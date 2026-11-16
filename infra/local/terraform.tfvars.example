@@ -1,6 +1,14 @@
-# Copy to terraform.tfvars (git-ignored) and adjust.
-# Windows + Docker Desktop:
-docker_host = "npipe:////./pipe/docker_engine"
+# Copy to terraform.tfvars (git-ignored) only if you need to change something.
+# You normally do NOT need this file: leave docker_host unset and Terraform uses your
+# Docker Desktop through the DOCKER_HOST variable or the default socket.
+#
+# docker_host: set it ONLY when the default doesn't work, and use the line for YOUR system.
+#   Windows (Docker Desktop):  docker_host = "npipe:////./pipe/docker_engine"
+#   macOS (Docker Desktop):    docker_host = "unix:///Users/<you>/.docker/run/docker.sock"
+#   Linux:                     docker_host = "unix:///var/run/docker.sock"
+# (Using the Windows line on macOS/Linux fails with "protocol not available".)
+#
+# docker_host = ""
 
 # ghcr (default) = pull published images; build = build from this checkout
 image_source = "ghcr"

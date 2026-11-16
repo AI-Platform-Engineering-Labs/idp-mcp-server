@@ -1,5 +1,5 @@
 variable "docker_host" {
-  description = "Docker daemon address. Leave empty on Linux/macOS; on Windows use npipe:////./pipe/docker_engine."
+  description = "Docker daemon address. Leave empty to use DOCKER_HOST or the default socket. Windows: npipe:////./pipe/docker_engine. macOS: unix:///Users/<you>/.docker/run/docker.sock. Never use the Windows value on macOS/Linux."
   type        = string
   default     = ""
 }
