@@ -1,0 +1,56 @@
+# Backstage: the IDP portal. Public (LoadBalancer) so the audience can see it.
+# BACKSTAGE_BASE_URL is set by the deploy workflow once the public IP is known.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backstage-config
+data:
+  BACKSTAGE_BASE_URL: http://localhost:7007
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backstage
+  labels: {app: backstage}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: backstage}
+  template:
+    metadata:
+      labels: {app: backstage}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: backstage
+          image: idp-backstage
+          ports: [{containerPort: 7007}]
+          envFrom:
+            - configMapRef: {name: backstage-config}
+          env:
+            - name: MCP_BACKSTAGE_TOKEN
+              valueFrom: {secretKeyRef: {name: idp-tokens, key: mcp-backstage-token}}
+          resources:
+            requests: {cpu: 250m, memory: 768Mi}
+            limits: {memory: 1536Mi}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          startupProbe:
+            httpGet: {path: /.backstage/health/v1/readiness, port: 7007}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /.backstage/health/v1/readiness, port: 7007}
+          livenessProbe:
+            httpGet: {path: /.backstage/health/v1/liveness, port: 7007}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backstage
+spec:
+  type: LoadBalancer
+  selector: {app: backstage}
+  ports:
+    - {name: http, port: 80, targetPort: 7007}
+    - {name: internal, port: 7007, targetPort: 7007}  # in-cluster calls from the MCP server

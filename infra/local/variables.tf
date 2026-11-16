@@ -4,14 +4,43 @@ variable "docker_host" {
   default     = ""
 }
 
-variable "host_port" {
+variable "image_source" {
+  description = <<-EOT
+    Where the Backstage and MCP server images come from:
+      ghcr  = pull the published images (fast; built by the images workflow on every merge)
+      build = build them from this checkout (Backstage takes ~10-15 minutes the first time)
+      local = use idp-backstage:local / idp-mcp-server:local already on this machine
+  EOT
+  type        = string
+  default     = "ghcr"
+
+  validation {
+    condition     = contains(["ghcr", "build", "local"], var.image_source)
+    error_message = "Use ghcr, build or local."
+  }
+}
+
+variable "image_tag" {
+  description = "Tag to pull when image_source = ghcr."
+  type        = string
+  default     = "latest"
+}
+
+variable "backstage_port" {
+  description = "Port on your laptop for Backstage."
+  type        = number
+  default     = 7007
+}
+
+variable "mcp_port" {
   description = "Port on your laptop for the MCP server."
   type        = number
   default     = 8000
 }
 
-variable "container_name" {
-  description = "Name of the local container."
+variable "mcp_backstage_token" {
+  description = "Token the MCP server uses to call Backstage (catalog + proxy only). Local demo default, same as compose.yaml."
   type        = string
-  default     = "idp-mcp-server"
+  default     = "local-dev-token-change-me"
+  sensitive   = true
 }

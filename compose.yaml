@@ -1,11 +1,56 @@
-# Quickest local run: docker compose up --build
-# MCP endpoint: http://localhost:8000/mcp   Health: http://localhost:8000/healthz
+# The whole IDP demo on your laptop:  docker compose up --build -d
+#   Backstage portal:  http://localhost:7007
+#   MCP endpoint:      http://localhost:8000/mcp     (health: /healthz)
+# The sample services publish no ports: only Backstage (and so the MCP server,
+# through Backstage's proxy) can reach them, like on AKS.
+# The first build of the Backstage image takes ~10 minutes.
+
+x-service: &service
+  image: hashicorp/http-echo:1.0
+  restart: unless-stopped
+
 services:
+  payments-api:
+    <<: *service
+    command: ["-listen=:5678", '-text={"service":"payments-api","owner":"team-payments","status":"healthy"}']
+  orders-web:
+    <<: *service
+    command: ["-listen=:5678", '-text={"service":"orders-web","owner":"team-storefront","status":"healthy"}']
+  notifications-worker:
+    <<: *service
+    command: ["-listen=:5678", '-text={"service":"notifications-worker","owner":"team-platform","status":"healthy"}']
+
+  backstage:
+    build: ./backstage
+    image: idp-backstage:local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7007:7007"
+    environment:
+      BACKSTAGE_BASE_URL: http://localhost:7007
+      MCP_BACKSTAGE_TOKEN: ${MCP_BACKSTAGE_TOKEN:-local-dev-token-change-me}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7007/.backstage/health/v1/readiness').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      retries: 30
+    depends_on: [payments-api, orders-web, notifications-worker]
+
   idp-mcp-server:
     build: .
     image: idp-mcp-server:local
+    restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       MCP_TRANSPORT: http
-      # GITHUB_TOKEN: ${GITHUB_TOKEN}   # needed from roadmap step 3 (GitHub API tools)
+      BACKSTAGE_URL: http://backstage:7007
+      BACKSTAGE_TOKEN: ${MCP_BACKSTAGE_TOKEN:-local-dev-token-change-me}
+    depends_on:
+      backstage:
+        condition: service_healthy
+
+# Same network name as the Terraform stack, so VS Code's stdio server
+# (.vscode/mcp.json) can join it and reach Backstage.
+networks:
+  default:
+    name: idp

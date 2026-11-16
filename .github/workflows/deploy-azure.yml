@@ -1,6 +1,6 @@
 name: deploy-azure
 
-# Provision and deploy to a KodeKloud Azure playground.
+# Provision AKS in a KodeKloud Azure playground and deploy the IDP demo to it.
 #
 # New playground? Only update three repository SECRETS
 # (Settings > Secrets and variables > Actions), from the playground page:
@@ -10,14 +10,20 @@ name: deploy-azure
 # then Actions > deploy-azure > Run workflow (action: apply).
 # The subscription and the kml_rg_main_* resource group are found automatically
 # (scripts/azure-login.sh). ARM_SUBSCRIPTION_ID / RESOURCE_GROUP are optional overrides.
+#
+# Images come from GHCR (built by the images workflow on every merge to main).
 on:
   workflow_dispatch:
     inputs:
       action:
-        description: "apply = create/update and deploy; destroy = remove the resources"
+        description: "apply = create/update AKS and deploy; destroy = remove the resources"
         type: choice
         options: [apply, destroy]
         default: apply
+      image_tag:
+        description: "Image tag to deploy (latest, or a commit SHA from the images workflow)"
+        type: string
+        default: latest
 
 permissions:
   contents: read
@@ -29,20 +35,32 @@ env:
   ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
   ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
   TF_IN_AUTOMATION: "true"
+  REGISTRY: ghcr.io/ai-platform-engineering-labs
 
 jobs:
   infra:
-    name: terraform ${{ inputs.action }}
+    name: terraform ${{ inputs.action }} (AKS)
     runs-on: ubuntu-latest
     # Optional human approval: create an environment called "sandbox" with
     # yourself as required reviewer (Settings > Environments).
     environment: sandbox
     outputs:
-      webapp_name: ${{ steps.out.outputs.webapp_name }}
-      webapp_url: ${{ steps.out.outputs.webapp_url }}
+      cluster_name: ${{ steps.out.outputs.cluster_name }}
       resource_group: ${{ steps.out.outputs.resource_group }}
     steps:
       - uses: actions/checkout@v4
+      - name: Check the images can be pulled without credentials
+        if: inputs.action == 'apply'
+        run: |
+          for img in idp-backstage idp-mcp-server; do
+            TOKEN=$(curl -fsS "https://ghcr.io/token?scope=repository:ai-platform-engineering-labs/$img:pull" | jq -r .token)
+            curl -fsS -o /dev/null -H "Authorization: Bearer $TOKEN" \
+              -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.v2+json" \
+              "https://ghcr.io/v2/ai-platform-engineering-labs/$img/manifests/${{ inputs.image_tag }}" || {
+              echo "::error::Can't pull $REGISTRY/$img:${{ inputs.image_tag }}. Run the images workflow first, and make the package public (org > Packages > $img > Package settings > Change visibility)."
+              exit 1; }
+          done
+          echo "Images OK"
       # Logs in with the service principal secret (the playground blocks OIDC)
       # and exports ARM_SUBSCRIPTION_ID + RESOURCE_GROUP for the steps below.
       - name: Azure login + find playground
@@ -61,29 +79,33 @@ jobs:
             -backend-config="resource_group_name=$RESOURCE_GROUP" \
             -backend-config="storage_account_name=$TF_BACKEND_SA" \
             -backend-config="container_name=tfstate" \
-            -backend-config="key=idp-mcp-server.tfstate"
+            -backend-config="key=idp-aks.tfstate"
       - name: terraform plan
         working-directory: infra/azure
         run: |
           FLAGS=""; [ "${{ inputs.action }}" = destroy ] && FLAGS="-destroy"
           terraform plan -input=false -no-color $FLAGS -var "resource_group_name=$RESOURCE_GROUP" -out tfplan | tee plan.txt
           { echo '### Terraform plan'; echo '```'; tail -n 40 plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-      - name: terraform apply
+      - name: terraform apply (AKS takes ~5-8 minutes)
         working-directory: infra/azure
         run: terraform apply -input=false tfplan
       - id: out
         if: inputs.action == 'apply'
         working-directory: infra/azure
         run: |
-          echo "webapp_name=$(terraform output -raw webapp_name)" >> "$GITHUB_OUTPUT"
-          echo "webapp_url=$(terraform output -raw webapp_url)" >> "$GITHUB_OUTPUT"
-          echo "resource_group=$RESOURCE_GROUP" >> "$GITHUB_OUTPUT"
+          {
+            echo "cluster_name=$(terraform output -raw cluster_name)"
+            echo "resource_group=$RESOURCE_GROUP"
+          } >> "$GITHUB_OUTPUT"
 
-  app:
-    name: deploy server code
+  k8s:
+    name: deploy to AKS
     needs: infra
     if: inputs.action == 'apply'
     runs-on: ubuntu-latest
+    env:
+      RG: ${{ needs.infra.outputs.resource_group }}
+      CLUSTER: ${{ needs.infra.outputs.cluster_name }}
     steps:
       - uses: actions/checkout@v4
       - name: Azure login + find playground
@@ -91,23 +113,63 @@ jobs:
         env:
           SUBSCRIPTION_OVERRIDE: ${{ secrets.ARM_SUBSCRIPTION_ID }}
           RESOURCE_GROUP_OVERRIDE: ${{ vars.RESOURCE_GROUP }}
-      # Ship only server/ (code, catalog, requirements.txt). App Service runs pip install.
-      - name: Zip deploy server/
+      - name: Get cluster credentials
+        run: az aks get-credentials -g "$RG" -n "$CLUSTER" --overwrite-existing
+      - name: Shared token (MCP server -> Backstage)
         run: |
-          (cd server && zip -qr ../server.zip . -x 'tests/*' '**/__pycache__/*')
-          az webapp deploy -g "${{ needs.infra.outputs.resource_group }}" \
-            -n "${{ needs.infra.outputs.webapp_name }}" --src-path server.zip --type zip --timeout 600000
-      - name: Smoke test
+          kubectl create namespace idp --dry-run=client -o yaml | kubectl apply -f -
+          # Created once per cluster and kept on re-runs.
+          if ! kubectl -n idp get secret idp-tokens >/dev/null 2>&1; then
+            kubectl -n idp create secret generic idp-tokens \
+              --from-literal=mcp-backstage-token="$(openssl rand -hex 24)"
+          fi
+      - name: Apply manifests (k8s/)
         run: |
-          BASE="${{ needs.infra.outputs.webapp_url }}"
-          for i in $(seq 1 30); do
-            curl -fsS "$BASE/healthz" && break
-            [ "$i" = 30 ] && { echo "Not healthy after 5 minutes" >&2; exit 1; }
-            sleep 10
+          cd k8s
+          kustomize edit set image "idp-backstage=$REGISTRY/idp-backstage:${{ inputs.image_tag }}"
+          kustomize edit set image "idp-mcp-server=$REGISTRY/idp-mcp-server:${{ inputs.image_tag }}"
+          kubectl apply -k .
+      - name: Wait for public IPs
+        id: ips
+        run: |
+          for svc in backstage mcp-server; do
+            for i in $(seq 1 60); do
+              IP=$(kubectl -n idp get svc "$svc" -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+              [ -n "$IP" ] && break
+              [ "$i" = 60 ] && { echo "No public IP for $svc after 5 minutes" >&2; kubectl -n idp describe svc "$svc"; exit 1; }
+              sleep 5
+            done
+            echo "$svc=$IP" >> "$GITHUB_OUTPUT"
+            echo "$svc: $IP"
           done
-          bash scripts/smoke-test.sh "$BASE"
+      - name: Tell Backstage its public URL
+        run: |
+          kubectl -n idp create configmap backstage-config \
+            --from-literal=BACKSTAGE_BASE_URL="http://${{ steps.ips.outputs.backstage }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n idp rollout restart deployment/backstage
+      - name: Wait for rollouts
+        run: |
+          for d in payments-api orders-web notifications-worker mcp-server backstage; do
+            kubectl -n idp rollout status "deployment/$d" --timeout=10m
+          done
+      - name: Smoke test through the MCP server
+        run: bash scripts/smoke-test.sh "http://${{ steps.ips.outputs.mcp-server }}"
+      - name: Show that services are reachable only via the IDP
+        run: |
+          # A pod that is not Backstage tries to call payments-api directly: the network policy drops it.
+          if kubectl -n idp run netpol-check --rm -i --restart=Never --image=curlimages/curl:8.11.0 \
+               --command -- curl -sS -m 5 http://payments-api:5678/ ; then
+            echo "::warning::payments-api answered a direct call: the network policy is not enforced."
+          else
+            echo "OK: direct call blocked; payments-api is only reachable through Backstage."
+          fi
+      - name: Summary
+        if: always()
+        run: |
+          kubectl -n idp get pods,svc -o wide || true
           {
-            echo "### MCP server is live"
-            echo "- MCP endpoint: $BASE/mcp"
-            echo "- Health: $BASE/healthz"
+            echo "### IDP demo is live"
+            echo "- Backstage portal: http://${{ steps.ips.outputs.backstage }}"
+            echo "- MCP endpoint: http://${{ steps.ips.outputs.mcp-server }}/mcp"
           } >> "$GITHUB_STEP_SUMMARY"

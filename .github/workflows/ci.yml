@@ -29,28 +29,71 @@ jobs:
 
   local-stack:
     name: local stack (terraform apply + smoke test)
-    # Runs exactly what you run on your laptop: Terraform builds the image and
-    # starts the container through the Docker provider, then we call the MCP endpoint.
+    # Runs what you run on your laptop: Terraform starts Backstage, the MCP server and
+    # the sample services in Docker, then an MCP client call goes all the way through.
     runs-on: ubuntu-latest
-    defaults: { run: { working-directory: infra/local } }
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # Build with BuildKit + cache here (Backstage takes minutes); Terraform then uses
+      # these local images (image_source = "local").
+      - name: Build Backstage image
+        uses: docker/build-push-action@v6
+        with:
+          context: backstage
+          load: true
+          tags: idp-backstage:local
+          cache-from: type=gha,scope=idp-backstage
+          cache-to: type=gha,mode=max,scope=idp-backstage
+      - name: Build MCP server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: idp-mcp-server:local
+          cache-from: type=gha,scope=idp-mcp-server
+          cache-to: type=gha,mode=max,scope=idp-mcp-server
       - uses: hashicorp/setup-terraform@v3
         with: { terraform_version: "1.9.8", terraform_wrapper: false }
-      - run: terraform init -input=false
-      - run: terraform apply -auto-approve -input=false
-      - name: Smoke test (HTTP)
+      - name: terraform apply
+        working-directory: infra/local
         run: |
-          for i in $(seq 1 20); do curl -fsS http://localhost:8000/healthz && break; sleep 1; done
-          bash ../../scripts/smoke-test.sh http://localhost:8000
+          terraform init -input=false
+          terraform apply -auto-approve -input=false -var image_source=local
+      - name: Wait for Backstage
+        run: |
+          for i in $(seq 1 60); do
+            curl -fsS http://localhost:7007/.backstage/health/v1/readiness && break
+            [ "$i" = 60 ] && { echo "Backstage did not start" >&2; docker logs backstage | tail -50; exit 1; }
+            sleep 5
+          done
+      - name: Smoke test (HTTP, through Backstage)
+        run: bash scripts/smoke-test.sh http://localhost:8000
+      - name: Services are not reachable directly
+        run: |
+          if curl -fsS -m 3 http://localhost:5678/; then echo "payments-api should not be published" >&2; exit 1; fi
+          echo "OK: services are only reachable inside the idp network"
       - name: Smoke test (stdio, the way VS Code runs it)
         run: |
           echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
             | timeout 20 docker run -i --rm idp-mcp-server:local --transport stdio | grep -q '"serverInfo"'
+      - if: failure()
+        run: docker logs backstage 2>&1 | tail -80; docker logs idp-mcp-server 2>&1 | tail -40
       - if: always()
-        run: docker logs idp-mcp-server || true
-      - if: always()
-        run: terraform destroy -auto-approve -input=false
+        working-directory: infra/local
+        run: terraform destroy -auto-approve -input=false -var image_source=local
+
+  k8s:
+    name: kubernetes manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render with kustomize
+        run: kubectl kustomize k8s > rendered.yaml && grep -c '^kind:' rendered.yaml
+      - name: Validate against the Kubernetes schemas
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
+          ./kubeconform -strict -summary rendered.yaml
 
   terraform:
     name: terraform (${{ matrix.stack }})

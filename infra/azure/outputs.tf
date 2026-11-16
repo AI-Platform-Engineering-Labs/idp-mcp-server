@@ -1,12 +1,12 @@
-output "webapp_name" {
-  value = azurerm_linux_web_app.mcp.name
+output "cluster_name" {
+  value = azurerm_kubernetes_cluster.aks.name
 }
 
-output "webapp_url" {
-  value = "https://${azurerm_linux_web_app.mcp.default_hostname}"
+output "resource_group_name" {
+  value = data.azurerm_resource_group.sandbox.name
 }
 
-output "mcp_url" {
-  description = "Point your MCP client here."
-  value       = "https://${azurerm_linux_web_app.mcp.default_hostname}/mcp"
+output "node_resource_group" {
+  description = "Resource group AKS creates for the nodes, load balancer and public IPs."
+  value       = azurerm_kubernetes_cluster.aks.node_resource_group
 }

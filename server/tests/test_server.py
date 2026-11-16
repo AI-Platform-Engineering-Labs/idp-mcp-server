@@ -16,7 +16,7 @@ def _text(result) -> str:
 @pytest.mark.asyncio
 async def test_tools_are_registered():
     names = {t.name for t in await mcp.list_tools()}
-    assert {"hello", "list_services"} <= names
+    assert {"hello", "list_services", "call_service"} <= names
 
 
 @pytest.mark.asyncio

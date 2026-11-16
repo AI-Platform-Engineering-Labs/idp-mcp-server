@@ -3,6 +3,8 @@
 .vscode
 infra
 docs
+k8s
+backstage
 **/__pycache__
 **/.pytest_cache
 **/.ruff_cache

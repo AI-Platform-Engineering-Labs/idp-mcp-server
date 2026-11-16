@@ -1,0 +1,18 @@
+# "Reachable via the IDP only": the sample services accept traffic from
+# Backstage pods and nothing else, not even the MCP server. The MCP server has
+# to go through Backstage (its proxy), where the token and access rules apply.
+# Enforced on AKS (Cilium network policy). Docker Desktop's Kubernetes ignores it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: services-only-from-backstage
+spec:
+  podSelector:
+    matchLabels: {idp.demo/role: service}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: backstage}
+      ports:
+        - {port: 5678, protocol: TCP}

@@ -1,0 +1,32 @@
+# Teams and the demo user. Everyone signs in as "guest" in this demo.
+apiVersion: backstage.io/v1alpha1
+kind: User
+metadata:
+  name: guest
+spec:
+  memberOf: [team-platform]
+---
+apiVersion: backstage.io/v1alpha1
+kind: Group
+metadata:
+  name: team-platform
+  description: Runs the IDP itself
+spec:
+  type: team
+  children: []
+---
+apiVersion: backstage.io/v1alpha1
+kind: Group
+metadata:
+  name: team-payments
+spec:
+  type: team
+  children: []
+---
+apiVersion: backstage.io/v1alpha1
+kind: Group
+metadata:
+  name: team-storefront
+spec:
+  type: team
+  children: []
