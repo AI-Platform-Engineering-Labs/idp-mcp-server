@@ -189,7 +189,8 @@ Docker connection error, see [Troubleshooting](#troubleshooting) (the fix depend
 
 By default it **pulls the published images** from GHCR (`image_source = "ghcr"`), which takes a
 minute. To build from your checkout instead, set `image_source = "build"` (Backstage takes
-10-15 minutes the first time).
+10-15 minutes the first time; on an Apple Silicon Mac `docker compose up --build` is faster
+because it builds natively).
 
 Backstage needs about a minute to start. Then:
 
@@ -317,7 +318,8 @@ Then in Copilot Chat (Agent mode) try:
 | `ci.yml` → `local stack` | every PR | builds both images, `terraform apply` in `infra/local`, MCP → Backstage → service works end to end, services are not published, stdio works |
 | `ci.yml` → `kubernetes manifests` | every PR | `k8s/` renders and passes schema validation (kubeconform) |
 | `ci.yml` → `terraform (local/azure)` | every PR | `terraform fmt` + `validate` |
-| `images.yml` | merge to `main` | publishes `:latest` and `:<sha>` to GHCR, warns if a package isn't public |
+| `ci.yml` → `multi-arch build` | every PR | both images also build for **arm64** (Apple Silicon Macs) |
+| `images.yml` | merge to `main` | publishes `:latest` and `:<sha>` to GHCR for **amd64 + arm64**, warns if a package isn't public |
 | `deploy-azure.yml` | manual | AKS + deploy + smoke test, or destroy |
 
 ---
@@ -347,6 +349,7 @@ Then in Copilot Chat (Agent mode) try:
 | `failed to create Docker client: protocol not available` | `docker_host` is set to a value for another OS (usually the Windows `npipe:` line on a Mac or Linux). Delete `infra/local/terraform.tfvars`, or set the line for your OS (see `terraform.tfvars.example`). |
 | `Cannot connect to the Docker daemon` (local `terraform apply`) | Start Docker Desktop. On macOS, if `/var/run/docker.sock` doesn't exist, run `export DOCKER_HOST=$(docker context inspect --format '{{.Endpoints.docker.Host}}')` and re-run, or enable Docker Desktop → Settings → Advanced → "Allow the default Docker socket to be used". On Windows set `docker_host = "npipe:////./pipe/docker_engine"`. |
 | `terraform apply` (local) fails pulling `ghcr.io/...` | Images not published or not public yet: use `image_source = "build"`. |
+| `no matching manifest for linux/arm64/v8` | You pulled an image built before multi-arch support (Apple Silicon Mac). Use `image_source = "build"`, or re-run the `images` workflow and `terraform apply` again. |
 | Backstage container exits / OOM | Give Docker Desktop more memory (Settings → Resources, ≥ 6 GB). |
 | `deploy-azure` fails at "Check the images" | Run the `images` workflow and make both packages public (see one-time setup). |
 | `deploy-azure` fails at "Azure login + find playground" | Update the three `ARM_*` secrets from the current playground page. |
