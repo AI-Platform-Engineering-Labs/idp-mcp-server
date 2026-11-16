@@ -1,13 +1,16 @@
-# Cloud deployment: Azure App Service in the KodeKloud Azure Sandbox Playground.
+# Cloud deployment: an AKS cluster in the KodeKloud Azure playground.
 # Applied by GitHub Actions (.github/workflows/deploy-azure.yml), not from a laptop.
+# What runs on the cluster (Backstage, the MCP server, the sample services) is in k8s/.
 #
-# Sandbox rules this code follows:
-#   * One resource group is pre-created for you and you can't create others,
+# Playground rules this code follows (kodekloud.com/cloud-playgrounds/azure):
+#   * One resource group is pre-created and you can't create others,
 #     so it is read with a data source instead of a resource.
-#   * Only some SKUs are allowed; App Service plan B1 (or F1) works.
+#   * AKS: 1 node pool, max 2 nodes, VM size Standard_D2s_v3 only. Alerting must be off
+#     (so no monitoring add-on).
+#   * Premium disks are not allowed: nodes use an ephemeral OS disk (on the VM's local cache).
+#   * No role assignments: so no ACR attach. Images come from public GHCR instead.
 #   * The service principal can't register resource providers.
-#   * Everything is wiped when the 2-hour session ends, so names get a random
-#     suffix and nothing depends on resources from an earlier session.
+#   * Everything is wiped when the session ends: names get a random suffix.
 
 terraform {
   required_version = ">= 1.6.0"
@@ -51,55 +54,33 @@ locals {
   }
 }
 
-resource "azurerm_service_plan" "plan" {
-  name                = "${var.prefix}-plan-${random_string.suffix.result}"
+resource "azurerm_kubernetes_cluster" "aks" {
+  name                = "${var.prefix}-aks-${random_string.suffix.result}"
   resource_group_name = data.azurerm_resource_group.sandbox.name
   location            = local.location
-  os_type             = "Linux"
-  sku_name            = var.sku
-  tags                = local.tags
-}
-
-resource "azurerm_linux_web_app" "mcp" {
-  name                = "${var.prefix}-${random_string.suffix.result}"
-  resource_group_name = data.azurerm_resource_group.sandbox.name
-  location            = local.location
-  service_plan_id     = azurerm_service_plan.plan.id
-  https_only          = true
+  dns_prefix          = "${var.prefix}-${random_string.suffix.result}"
+  kubernetes_version  = var.kubernetes_version != "" ? var.kubernetes_version : null
+  sku_tier            = "Free"
   tags                = local.tags
 
-  site_config {
-    always_on                         = var.sku != "F1"
-    ftps_state                        = "Disabled"
-    http2_enabled                     = true
-    minimum_tls_version               = "1.2"
-    health_check_path                 = "/healthz"
-    health_check_eviction_time_in_min = 2
-    # Same entrypoint as the Docker image, HTTP transport on the port App Service expects.
-    app_command_line = "python -m idp_mcp --transport http --port 8000"
-
-    application_stack {
-      python_version = "3.12"
-    }
+  default_node_pool {
+    name            = "system"
+    vm_size         = var.node_vm_size
+    node_count      = var.node_count
+    os_disk_type    = var.os_disk_type
+    os_disk_size_gb = var.os_disk_size_gb
   }
 
-  app_settings = {
-    SCM_DO_BUILD_DURING_DEPLOYMENT = "true" # App Service runs pip install -r requirements.txt
-    WEBSITES_PORT                  = "8000"
-    MCP_TRANSPORT                  = "http"
-    # Added in later roadmap steps (as App Service settings, never in code):
-    #   GITHUB_TOKEN    - fine-grained, least-privilege token for the GitHub API tools
-    #   MCP_API_KEY     - bearer token clients must send
+  # AKS manages its own identity; we never create a role assignment.
+  identity {
+    type = "SystemAssigned"
   }
 
-  logs {
-    detailed_error_messages = true
-    failed_request_tracing  = true
-    http_logs {
-      file_system {
-        retention_in_days = 3
-        retention_in_mb   = 35
-      }
-    }
+  network_profile {
+    network_plugin      = "azure"
+    network_plugin_mode = "overlay"
+    network_data_plane  = "cilium"
+    network_policy      = "cilium" # enforces k8s/network-policy.yaml (services reachable only from Backstage)
+    load_balancer_sku   = "standard"
   }
 }

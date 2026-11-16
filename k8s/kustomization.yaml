@@ -1,0 +1,19 @@
+# Everything that runs on the cluster (AKS, or Docker Desktop Kubernetes).
+#   kubectl apply -k k8s/
+# The deploy workflow pins the image tags with `kustomize edit set image`.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: idp
+resources:
+  - namespace.yaml
+  - services.yaml
+  - backstage.yaml
+  - mcp-server.yaml
+  - network-policy.yaml
+images:
+  - name: idp-backstage
+    newName: ghcr.io/ai-platform-engineering-labs/idp-backstage
+    newTag: latest
+  - name: idp-mcp-server
+    newName: ghcr.io/ai-platform-engineering-labs/idp-mcp-server
+    newTag: latest

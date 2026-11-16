@@ -1,30 +1,36 @@
 {
   // VS Code (Copilot agent mode) MCP servers for this repo.
   // Pick ONE in the MCP: List Servers view and click Start.
+  // First start the local stack (docker compose up -d, or terraform apply in infra/local).
   "servers": {
-    // 1) stdio: VS Code starts the container itself and talks over stdin/stdout.
-    //    Build the image first: docker build -t idp-mcp-server:local .
+    // 1) stdio: VS Code starts an MCP server container itself and talks over stdin/stdout.
+    //    It joins the local "idp" Docker network to reach Backstage.
     "idp-local-stdio": {
       "type": "stdio",
       "command": "docker",
-      "args": ["run", "-i", "--rm", "idp-mcp-server:local", "--transport", "stdio"]
+      "args": [
+        "run", "-i", "--rm", "--network", "idp",
+        "-e", "BACKSTAGE_URL=http://backstage:7007",
+        "-e", "BACKSTAGE_TOKEN=local-dev-token-change-me",
+        "idp-mcp-server:local", "--transport", "stdio"
+      ]
     },
-    // 2) HTTP: the server is already running (docker compose up / terraform apply in infra/local).
+    // 2) HTTP: the MCP server container from the local stack.
     "idp-local-http": {
       "type": "http",
       "url": "http://localhost:8000/mcp"
     },
-    // 3) Azure: paste the webapp_url output from the deploy workflow.
-    "idp-azure": {
+    // 3) AKS: the MCP endpoint from the deploy-azure run summary.
+    "idp-aks": {
       "type": "http",
-      "url": "${input:azureUrl}/mcp"
+      "url": "${input:aksMcpUrl}"
     }
   },
   "inputs": [
     {
-      "id": "azureUrl",
+      "id": "aksMcpUrl",
       "type": "promptString",
-      "description": "Azure web app URL, e.g. https://idpmcp-abc123.azurewebsites.net"
+      "description": "MCP endpoint from the deploy-azure run summary, e.g. http://20.1.2.3/mcp"
     }
   ]
 }

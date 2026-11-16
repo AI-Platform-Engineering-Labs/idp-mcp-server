@@ -1,6 +1,18 @@
 # Architecture and design choices
 
-This page explains *why* the scaffold looks the way it does, so you can explain it on stage.
+This page explains *why* the demo looks the way it does, so you can explain it on stage.
+
+## The three layers
+
+| Layer | Component | Job |
+|---|---|---|
+| Agent | VS Code Copilot / Claude | Decides which tool to call, based on tool descriptions |
+| Agent gateway | **MCP server** (`server/`) | Turns IDP capabilities into a small set of well-described, guarded tools |
+| Platform | **Backstage** (`backstage/`) + services | Knows what exists, who owns it, and is the only door to the services |
+
+The MCP server holds no knowledge of its own: ask it for services and it asks Backstage. That is
+deliberate. The IDP stays the source of truth, and the MCP server is a thin, auditable layer whose
+whole purpose is *what an agent may do*.
 
 ## How an MCP call flows
 
@@ -9,10 +21,10 @@ This page explains *why* the scaffold looks the way it does, so you can explain 
 2. The client sends `tools/list`. Each tool comes back with a name, a description (the docstring)
    and a JSON schema built from the Python type hints. **The description is what the model reads
    to decide when to call the tool**, so it is part of your API design.
-3. When the model wants a tool, the client sends `tools/call` with arguments. The server validates
-   them against the schema, runs the function and returns content (text) plus structured output.
+3. When the model wants a tool, the client sends `tools/call`. The server validates the arguments,
+   runs the function and returns content plus structured output.
 
-You can watch this with nothing but curl, which is what `scripts/smoke-test.sh` does:
+You can watch this with curl, which is what `scripts/smoke-test.sh` does:
 
 ```bash
 curl -X POST http://localhost:8000/mcp \
@@ -20,44 +32,53 @@ curl -X POST http://localhost:8000/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-## Code (server/idp_mcp/server.py)
+## Guardrails already in place
 
-- Uses the **official MCP Python SDK** (`mcp` 2.x, `MCPServer` class, formerly `FastMCP`).
-  A tool is a decorated Python function: `@mcp.tool()`.
-- Read-only tools carry `ToolAnnotations(readOnlyHint=True, destructiveHint=False)`. Clients use
-  these hints, for example to skip confirmation for safe tools. Write tools (roadmap) will be
-  marked `destructiveHint=True`. Hints are advisory, so real enforcement happens on the server
-  (approval, token scopes).
-- `--transport stdio|http` picks the transport. HTTP mode builds a Starlette app with
-  `streamable_http_app(stateless_http=True, json_response=True)` and serves it with uvicorn:
-  - *stateless*: no server-side session, so a restart or second instance doesn't break clients;
-  - *json_response*: plain JSON replies instead of an SSE stream, simple to curl and to debug.
-- `/healthz` is a `custom_route`, plain HTTP outside MCP.
+| Guardrail | Where | How |
+|---|---|---|
+| Services reachable **only via the IDP** | `k8s/network-policy.yaml`, `k8s/services.yaml` | Services are `ClusterIP` (no public IP). A NetworkPolicy, enforced by Cilium on AKS, lets only Backstage pods in. The deploy workflow proves a direct call is blocked. |
+| **Least-privilege token** for the MCP server | `backstage/app-config.yaml` → `backend.auth.externalAccess` | A static token whose `accessRestrictions` allow only the `catalog` and `proxy` plugins. Checked locally: catalog 200, proxy 200, search 403, scaffolder 403, no token 401. |
+| **Only catalog services** can be called | `server/idp_mcp/platform.py` | `call_service` checks the name against the catalog and rejects paths with `..`, `//` or no leading `/`. No URL from the model is ever fetched directly. |
+| **Read-only** tool hints | `server/idp_mcp/server.py` | `ToolAnnotations(readOnlyHint=True)`. Clients can skip confirmation for these. Write tools (roadmap) will be `destructiveHint=True`. Hints are advisory, so enforcement stays on the server side. |
+| **Errors the agent can read** | `PlatformError(ToolError)` | Expected failures (unknown service, Backstage down) become a clear `isError` result; unexpected crashes are logged but their details are not shown to the model. |
+| No cluster credentials for the agent | the whole design | The MCP server pod has no Kubernetes service account token (`automountServiceAccountToken: false`). |
 
-## Local deployment (infra/local)
+## Backstage choices
 
-- Terraform with the `kreuzwerker/docker` provider. Two resources: `docker_image` (builds the
-  repo's `Dockerfile`) and `docker_container` (runs it, port bound to `127.0.0.1` only).
-- A hash of the source files is a `trigger` on the image, so code changes rebuild on `apply`.
-- State is a local file. Nothing to set up, nothing to pay.
+- Generated with `npx @backstage/create-app` (Backstage 1.56, new frontend system). Kept close to
+  the template so it's easy to upgrade, with these changes:
+  - `catalog/`: our org (teams) and the `shop` system with its services.
+  - `proxy.endpoints./svc/<name>`: one endpoint per service. The proxy requires a Backstage token
+    by default (`credentials: require`), so anonymous callers get 401.
+  - `backend.auth.externalAccess`: the MCP server's token, described above.
+  - Production config: base URL from `BACKSTAGE_BASE_URL`, **in-memory SQLite** (the catalog is
+    re-read from files on start, so no PostgreSQL to run), **guest sign-in** (demo only).
+  - `packages/backend/src/index.ts`: the PostgreSQL search module removed (in-memory Lunr instead).
+- The `Dockerfile` builds everything inside Docker (multi-stage), so no Node.js on the laptop, and
+  it avoids BuildKit-only syntax so Terraform's Docker provider can build it too.
 
-## Cloud deployment (infra/azure)
+## Kubernetes (k8s/)
 
-- `data "azurerm_resource_group"`: the sandbox gives you one resource group and forbids creating
-  others, so it's read, not managed.
-- `azurerm_service_plan` (Linux, B1) + `azurerm_linux_web_app` with the built-in Python 3.12
-  stack and the startup command `python -m idp_mcp --transport http --port 8000`.
-- Code, not container: the sandbox blocks ACR builds and a public registry image would need extra
-  setup, so the workflow zip-deploys `server/` and App Service installs `requirements.txt`
-  (`SCM_DO_BUILD_DURING_DEPLOYMENT=true`).
-- Hardening that costs nothing: HTTPS only, TLS 1.2 minimum, FTPS disabled, health check with
-  eviction, HTTP logs kept 3 days.
-- State backend `azurerm` with partial config: the workflow passes the storage account at
-  `terraform init` time, because its name depends on the session's subscription and resource group.
+- One namespace `idp`. Backstage and the MCP server have `LoadBalancer` services (public IPs on
+  AKS); the three services are `ClusterIP`.
+- Same host names everywhere (`backstage`, `payments-api`, ...), so the same Backstage config
+  works in Kubernetes and in Docker.
+- All pods run as non-root, no privilege escalation, all capabilities dropped.
+- The MCP↔Backstage token is a Kubernetes Secret created by the workflow (`openssl rand`), never
+  stored in git.
+
+## Azure (infra/azure)
+
+- `data "azurerm_resource_group"`: the playground gives one resource group and forbids creating
+  others, so it's read, not managed. AKS still creates its own `MC_...` node resource group.
+- AKS: 2 × `Standard_D2s_v3` (the playground's only allowed size), Free tier, ephemeral OS disk
+  (no Premium managed disk), Azure CNI overlay with the **Cilium** data plane and network policy.
+- No monitoring add-on (the playground requires alerting off) and no role assignments (blocked),
+  which is why images come from public GHCR instead of an attached ACR.
 
 ## Why Terraform runs in GitHub Actions, not on the laptop
 
-- No Azure CLI or Python needed locally.
-- Sandbox credentials live only in GitHub secrets for the session, not in a shell history.
+- No Azure CLI, kubectl or Python needed locally.
+- Playground credentials live only in GitHub secrets, not in a shell history.
 - The `sandbox` environment's required reviewer gives a human approval before any change: the
   same "human in the loop" idea the talk applies to AI agents.

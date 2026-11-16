@@ -1,0 +1,65 @@
+# The software catalog: the services running on the platform.
+# Each one runs in the cluster with NO public address. The only way to reach it is
+# the Backstage proxy at /api/proxy/svc/<name>/ (see proxy.endpoints in app-config.yaml),
+# which is exactly what the MCP server's call_service tool uses.
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: shop
+  description: The demo online shop
+spec:
+  owner: team-platform
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: payments-api
+  description: Takes card payments for orders
+  annotations:
+    idp.demo/tier: critical
+  tags: [python]
+spec:
+  type: service
+  lifecycle: production
+  owner: team-payments
+  system: shop
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: orders-web
+  description: Storefront web app where customers place orders
+  annotations:
+    idp.demo/tier: standard
+  tags: [node]
+spec:
+  type: website
+  lifecycle: production
+  owner: team-storefront
+  system: shop
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: notifications-worker
+  description: Sends order and shipping emails
+  annotations:
+    idp.demo/tier: standard
+  tags: [go]
+spec:
+  type: service
+  lifecycle: experimental
+  owner: team-platform
+  system: shop
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: idp-mcp-server
+  description: MCP server that gives AI agents safe access to this platform
+  tags: [python, mcp]
+spec:
+  type: service
+  lifecycle: experimental
+  owner: team-platform
+  system: shop

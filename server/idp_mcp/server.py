@@ -1,7 +1,7 @@
 """The MCP server.
 
-Scaffold stage: one hello-world tool and the first read-only tool (list_services).
-The rest of the IDP tools are added step by step (see the roadmap in README.md).
+Read-only tools for now: hello, list_services, call_service. They talk to the IDP
+(Backstage) through idp_mcp.platform. Write tools come later (see the roadmap in README.md).
 
 Two transports, same tools:
   * stdio            -> a local client (VS Code, Claude Desktop) starts this process itself
@@ -17,8 +17,7 @@ from mcp.types import ToolAnnotations
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from idp_mcp import __version__
-from idp_mcp.catalog import load_services
+from idp_mcp import __version__, platform
 
 mcp = MCPServer(
     name="idp-mcp-server",
@@ -40,11 +39,23 @@ def hello(name: str = "platform engineer") -> str:
 
 @mcp.tool(annotations=READ_ONLY)
 def list_services(owner: str | None = None) -> list[dict]:
-    """List services in the platform catalog, optionally filtered by owning team."""
-    services = load_services()
+    """List services in the platform's software catalog (Backstage), optionally filtered
+    by owning team, e.g. owner="team-payments"."""
+    services = platform.list_services()
     if owner:
         services = [s for s in services if s.get("owner") == owner]
     return services
+
+
+# The services have no public address: this goes through the IDP's proxy.
+CALL_SERVICE = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True)
+
+
+@mcp.tool(annotations=CALL_SERVICE)
+def call_service(name: str, path: str = "/") -> dict:
+    """Send a GET request to a platform service through the IDP (Backstage proxy) and
+    return the HTTP status and response body. Use list_services to find valid names."""
+    return platform.call_service(name, path)
 
 
 # Plain HTTP health check (not MCP). App Service and Docker use it to know the app is alive.

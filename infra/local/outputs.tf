@@ -1,8 +1,9 @@
-output "mcp_url" {
-  description = "Point your MCP client (VS Code, MCP Inspector) here."
-  value       = "http://localhost:${var.host_port}/mcp"
+output "backstage_url" {
+  description = "The IDP portal."
+  value       = "http://localhost:${var.backstage_port}"
 }
 
-output "health_url" {
-  value = "http://localhost:${var.host_port}/healthz"
+output "mcp_url" {
+  description = "Point your MCP client (VS Code, Claude, MCP Inspector) here."
+  value       = "http://localhost:${var.mcp_port}/mcp"
 }
