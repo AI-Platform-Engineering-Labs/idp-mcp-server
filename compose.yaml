@@ -1,0 +1,11 @@
+# Quickest local run: docker compose up --build
+# MCP endpoint: http://localhost:8000/mcp   Health: http://localhost:8000/healthz
+services:
+  idp-mcp-server:
+    build: .
+    image: idp-mcp-server:local
+    ports:
+      - "8000:8000"
+    environment:
+      MCP_TRANSPORT: http
+      # GITHUB_TOKEN: ${GITHUB_TOKEN}   # needed from roadmap step 3 (GitHub API tools)

@@ -1,0 +1,3 @@
+# Only needed if you run Terraform by hand. The workflow passes these itself.
+resource_group_name = "kml_rg_main_xxxxxxxx"
+sku                 = "B1"

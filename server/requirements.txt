@@ -1,0 +1,4 @@
+# Runtime dependencies (pinned so CI, Docker and App Service all run the same thing).
+mcp==2.3.0
+uvicorn==0.38.0
+pyyaml==6.0.3

@@ -1,0 +1,99 @@
+name: deploy-azure
+
+# Manual deploy to the KodeKloud Azure sandbox.
+#   gh workflow run deploy-azure -f action=apply     (or the Run workflow button)
+#   gh workflow run deploy-azure -f action=destroy
+# Needs the ARM_* secrets and RESOURCE_GROUP variable from scripts/set-sandbox-secrets.sh.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "apply = create/update and deploy; destroy = remove the resources"
+        type: choice
+        options: [apply, destroy]
+        default: apply
+
+permissions:
+  contents: read
+
+concurrency: azure-sandbox
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+  ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+  RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  infra:
+    name: terraform ${{ inputs.action }}
+    runs-on: ubuntu-latest
+    # Create an environment called "sandbox" with yourself as required reviewer
+    # (Settings > Environments) to get a human approval before anything changes.
+    environment: sandbox
+    outputs:
+      webapp_name: ${{ steps.out.outputs.webapp_name }}
+      webapp_url: ${{ steps.out.outputs.webapp_url }}
+    defaults: { run: { working-directory: infra/azure } }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check sandbox secrets are set
+        run: |
+          for v in ARM_CLIENT_ID ARM_CLIENT_SECRET ARM_TENANT_ID ARM_SUBSCRIPTION_ID RESOURCE_GROUP; do
+            [ -n "${!v}" ] || { echo "::error::$v is missing. Run scripts/set-sandbox-secrets.sh"; exit 1; }
+          done
+      # The sandbox gives a service principal with a client secret and blocks
+      # federated credentials, so this uses the secret instead of OIDC.
+      - uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.ARM_CLIENT_ID }}","clientSecret":"${{ secrets.ARM_CLIENT_SECRET }}","subscriptionId":"${{ secrets.ARM_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.ARM_TENANT_ID }}"}'
+      - run: bash ../../scripts/tf-backend.sh
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "1.9.8", terraform_wrapper: false }
+      - name: terraform init
+        run: |
+          terraform init -input=false \
+            -backend-config="resource_group_name=$RESOURCE_GROUP" \
+            -backend-config="storage_account_name=$TF_BACKEND_SA" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=idp-mcp-server.tfstate"
+      - name: terraform plan
+        run: |
+          FLAGS=""; [ "${{ inputs.action }}" = destroy ] && FLAGS="-destroy"
+          terraform plan -input=false -no-color $FLAGS -var "resource_group_name=$RESOURCE_GROUP" -out tfplan | tee plan.txt
+          { echo '### Terraform plan'; echo '```'; tail -n 40 plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: terraform apply
+        run: terraform apply -input=false tfplan
+      - id: out
+        if: inputs.action == 'apply'
+        run: |
+          echo "webapp_name=$(terraform output -raw webapp_name)" >> "$GITHUB_OUTPUT"
+          echo "webapp_url=$(terraform output -raw webapp_url)" >> "$GITHUB_OUTPUT"
+
+  app:
+    name: deploy server code
+    needs: infra
+    if: inputs.action == 'apply'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.ARM_CLIENT_ID }}","clientSecret":"${{ secrets.ARM_CLIENT_SECRET }}","subscriptionId":"${{ secrets.ARM_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.ARM_TENANT_ID }}"}'
+      # Ship only server/ (code, catalog, requirements.txt). App Service runs pip install.
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ needs.infra.outputs.webapp_name }}
+          package: server
+      - name: Smoke test
+        run: |
+          BASE="${{ needs.infra.outputs.webapp_url }}"
+          for i in $(seq 1 30); do
+            curl -fsS "$BASE/healthz" && break
+            [ "$i" = 30 ] && { echo "Not healthy after 5 minutes" >&2; exit 1; }
+            sleep 10
+          done
+          bash scripts/smoke-test.sh "$BASE"
+          echo "### MCP server live at $BASE/mcp" >> "$GITHUB_STEP_SUMMARY"

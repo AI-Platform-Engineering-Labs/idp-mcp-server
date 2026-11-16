@@ -1,0 +1,68 @@
+name: ci
+
+# Runs on every PR and on main: the server must lint, test and build,
+# and both Terraform stacks must be formatted and valid.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    name: server (lint + test)
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: server } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -q
+
+  local-stack:
+    name: local stack (terraform apply + smoke test)
+    # Runs exactly what you run on your laptop: Terraform builds the image and
+    # starts the container through the Docker provider, then we call the MCP endpoint.
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: infra/local } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "1.9.8", terraform_wrapper: false }
+      - run: terraform init -input=false
+      - run: terraform apply -auto-approve -input=false
+      - name: Smoke test (HTTP)
+        run: |
+          for i in $(seq 1 20); do curl -fsS http://localhost:8000/healthz && break; sleep 1; done
+          bash ../../scripts/smoke-test.sh http://localhost:8000
+      - name: Smoke test (stdio, the way VS Code runs it)
+        run: |
+          echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
+            | timeout 20 docker run -i --rm idp-mcp-server:local --transport stdio | grep -q '"serverInfo"'
+      - if: always()
+        run: docker logs idp-mcp-server || true
+      - if: always()
+        run: terraform destroy -auto-approve -input=false
+
+  terraform:
+    name: terraform (${{ matrix.stack }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        stack: [local, azure]
+    defaults: { run: { working-directory: "infra/${{ matrix.stack }}" } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "1.9.8" }
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
