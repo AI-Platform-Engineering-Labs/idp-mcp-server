@@ -18,7 +18,13 @@ echo "== health"
 curl -fsS "$BASE/healthz"; echo
 
 echo "== list_services"
-OUT=$(call list_services '{}')
+# Backstage answers requests a few seconds before its catalog has loaded, so retry for ~60 s.
+OUT=""
+for _ in $(seq 1 20); do
+  OUT=$(call list_services '{}' || true)
+  echo "$OUT" | grep -q 'payments-api' && break
+  echo "  catalog not ready yet, retrying..."; sleep 3
+done
 echo "$OUT" | grep -q 'payments-api' || { echo "FAIL: list_services: $OUT" >&2; exit 1; }
 echo "OK: list_services returned the catalog"
 
