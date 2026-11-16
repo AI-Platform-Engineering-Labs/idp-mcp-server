@@ -180,10 +180,12 @@ published, on `127.0.0.1`.
 
 ```bash
 cd infra/local
-cp terraform.tfvars.example terraform.tfvars   # Windows: sets docker_host to Docker Desktop
 terraform init
 terraform apply                                # type yes
 ```
+
+Terraform finds Docker Desktop by itself in most cases, so no variables are needed. If you get a
+Docker connection error, see [Troubleshooting](#troubleshooting) (the fix depends on your OS).
 
 By default it **pulls the published images** from GHCR (`image_source = "ghcr"`), which takes a
 minute. To build from your checkout instead, set `image_source = "build"` (Backstage takes
@@ -342,7 +344,8 @@ Then in Copilot Chat (Agent mode) try:
 |---|---|
 | Browser shows `Not Found` at `localhost:8000` | Normal: the MCP server only serves `/mcp` and `/healthz`. Backstage is on port 7007. |
 | `smoke-test.sh` fails at `call_service` right after start | Backstage is still starting (~1 min). Check `http://localhost:7007/.backstage/health/v1/readiness`. |
-| `terraform apply` (local) can't reach Docker | Start Docker Desktop; on Windows set `docker_host = "npipe:////./pipe/docker_engine"`. |
+| `failed to create Docker client: protocol not available` | `docker_host` is set to a value for another OS (usually the Windows `npipe:` line on a Mac or Linux). Delete `infra/local/terraform.tfvars`, or set the line for your OS (see `terraform.tfvars.example`). |
+| `Cannot connect to the Docker daemon` (local `terraform apply`) | Start Docker Desktop. On macOS, if `/var/run/docker.sock` doesn't exist, run `export DOCKER_HOST=$(docker context inspect --format '{{.Endpoints.docker.Host}}')` and re-run, or enable Docker Desktop → Settings → Advanced → "Allow the default Docker socket to be used". On Windows set `docker_host = "npipe:////./pipe/docker_engine"`. |
 | `terraform apply` (local) fails pulling `ghcr.io/...` | Images not published or not public yet: use `image_source = "build"`. |
 | Backstage container exits / OOM | Give Docker Desktop more memory (Settings → Resources, ≥ 6 GB). |
 | `deploy-azure` fails at "Check the images" | Run the `images` workflow and make both packages public (see one-time setup). |
