@@ -115,7 +115,8 @@ idp-mcp-server/
 │   ├── local/                   # Terraform: Docker provider builds the image and runs the container
 │   └── azure/                   # Terraform: App Service plan + Linux web app in the sandbox RG
 ├── scripts/
-│   ├── set-sandbox-secrets.sh   # start of each sandbox session: copy SP creds into GitHub secrets
+│   ├── azure-login.sh           # (used by the workflow) login + find subscription and resource group
+│   ├── set-sandbox-secrets.sh   # optional: set the 3 playground secrets with gh instead of the UI
 │   ├── sandbox-down.sh          # end of session: delete those secrets
 │   ├── tf-backend.sh            # (used by the workflow) creates the Terraform state storage account
 │   └── smoke-test.sh            # curl /healthz and call list_services over MCP
@@ -218,7 +219,7 @@ docker run --rm -v "$PWD/server:/src" -w /src python:3.12-slim \
 | Sessions last **2 hours**, then everything is deleted | Deploy is one workflow run (~5 min). Names get a random suffix, nothing depends on an earlier session. |
 | One **pre-created resource group** (`kml_rg_main_...`); you can't create one | Terraform reads it with a `data` source, never creates one. |
 | Only some **SKUs/regions** | App Service plan **B1** (F1 also allowed), region = the resource group's region. |
-| Service principal with a **client secret**; no OIDC/federated credentials, no role assignments | The workflow logs in with the secret, stored as GitHub secrets for that session only. |
+| Service principal with a **client secret**; no OIDC/federated credentials, no role assignments | The workflow logs in with the secret, stored as 3 GitHub secrets you update per playground. |
 | SP can't register resource providers | `resource_provider_registrations = "none"` in the provider. |
 | ACR builds are blocked | App Service runs the Python code directly (built-in Python 3.12 stack), not a container image. |
 
@@ -232,38 +233,44 @@ the state goes with the resources, which is what you want here.
    **Required reviewers** to get an approval step before Terraform changes anything (optional
    but good practice, and it's a guardrail you can show in the talk).
 
-### Every sandbox session
+### Every new playground: update 3 secrets, click Run
 
-1. On KodeKloud, start the **Azure Playground**. Copy the service principal details
-   (client ID, client secret, tenant ID, subscription ID) and the resource group name.
-2. In Git Bash, from the repo folder:
+You never edit code or variables for a new playground. The workflow logs in with the service
+principal and **finds the subscription and the `kml_rg_main_*` resource group by itself**
+(`scripts/azure-login.sh`).
 
-   ```bash
-   export ARM_CLIENT_ID=...  ARM_CLIENT_SECRET=...  ARM_TENANT_ID=...
-   export ARM_SUBSCRIPTION_ID=...  RESOURCE_GROUP=kml_rg_main_...
-   bash scripts/set-sandbox-secrets.sh
-   ```
+1. On KodeKloud, start the **Azure Playground** and keep its page open.
+2. In GitHub: **Settings → Secrets and variables → Actions → Repository secrets**. Create (first
+   time) or update (every new playground) these three, copying the values from the playground page:
 
-   This stores them as repo secrets plus a `RESOURCE_GROUP` variable, using only `gh`.
-3. Deploy:
+   | Secret | Value from the playground |
+   |---|---|
+   | `ARM_CLIENT_ID` | Application (client) ID |
+   | `ARM_CLIENT_SECRET` | Client secret |
+   | `ARM_TENANT_ID` | Tenant (directory) ID |
 
-   ```bash
-   gh workflow run deploy-azure -f action=apply
-   gh run watch
-   ```
-
-   (or **Actions → deploy-azure → Run workflow**). Approve the `sandbox` environment if you set
-   it up. The workflow:
-   1. logs in to Azure with the sandbox service principal,
-   2. creates the state storage account if needed (`tf-backend.sh`),
+   Shortcut from Git Bash instead of clicking:
+   `export ARM_CLIENT_ID=... ARM_CLIENT_SECRET=... ARM_TENANT_ID=...` then
+   `bash scripts/set-sandbox-secrets.sh`.
+3. **Actions → deploy-azure → Run workflow**, keep `action: apply`, click **Run workflow**
+   (or `gh workflow run deploy-azure -f action=apply && gh run watch`).
+   Approve the `sandbox` environment if you set it up. The workflow:
+   1. logs in with the three secrets and finds the subscription and resource group,
+   2. creates the Terraform state storage account if needed (`tf-backend.sh`),
    3. `terraform plan` (shown in the run summary) then `terraform apply`,
    4. zips `server/` and deploys it to the web app (App Service runs `pip install`),
    5. waits for `/healthz` and calls `list_services` over MCP.
-4. The run summary shows the URL. The MCP endpoint is `https://<app>.azurewebsites.net/mcp`.
-   Test it with `bash scripts/smoke-test.sh https://<app>.azurewebsites.net` or connect
-   `idp-azure` in VS Code.
-5. When done: `gh workflow run deploy-azure -f action=destroy` (optional, the sandbox cleans up
-   anyway) and `bash scripts/sandbox-down.sh` to remove the expired secrets.
+4. The run summary shows the resource group and the MCP URL
+   (`https://<app>.azurewebsites.net/mcp`). Test it with
+   `bash scripts/smoke-test.sh https://<app>.azurewebsites.net` or connect `idp-azure` in VS Code.
+5. When done: optionally run the workflow with `action: destroy` (the playground cleans up anyway).
+
+If the login step fails with "playground has probably expired", the secrets are from an old
+playground: update them and re-run.
+
+**Optional overrides** (normally leave unset): secret `ARM_SUBSCRIPTION_ID` to pick a
+subscription, and variable `RESOURCE_GROUP` to pick a resource group. A `RESOURCE_GROUP` from an
+old playground is ignored with a warning.
 
 ### What gets created
 
@@ -319,6 +326,6 @@ The demo is built in small steps, each a PR that keeps CI green.
 | `terraform apply` in `infra/local` says it can't reach the Docker daemon | Start Docker Desktop; on Windows set `docker_host = "npipe:////./pipe/docker_engine"` in `terraform.tfvars`. |
 | Port 8000 already in use | Stop the other run (`docker compose down` or `terraform destroy`), or set `host_port = 8001`. |
 | VS Code `idp-local-stdio` fails to start | Build the image first: `docker build -t idp-mcp-server:local .` |
-| Workflow fails at "Check sandbox secrets" | Run `scripts/set-sandbox-secrets.sh` for this session; old session secrets don't work. |
+| `deploy-azure` fails at "Azure login + find playground" | Update the three `ARM_*` secrets from the current playground page; secrets from an old playground don't work. |
 | Azure `/healthz` never becomes healthy | First start takes a few minutes while App Service installs packages. Check **Log stream** in the portal. |
 | `terraform apply` in Azure fails with a SKU/region policy error | Keep `sku = "B1"` and leave `location` empty so it uses the resource group's region. |

@@ -1,9 +1,15 @@
 name: deploy-azure
 
-# Manual deploy to the KodeKloud Azure sandbox.
-#   gh workflow run deploy-azure -f action=apply     (or the Run workflow button)
-#   gh workflow run deploy-azure -f action=destroy
-# Needs the ARM_* secrets and RESOURCE_GROUP variable from scripts/set-sandbox-secrets.sh.
+# Provision and deploy to a KodeKloud Azure playground.
+#
+# New playground? Only update three repository SECRETS
+# (Settings > Secrets and variables > Actions), from the playground page:
+#   ARM_CLIENT_ID      = Application / Client ID
+#   ARM_CLIENT_SECRET  = Client secret
+#   ARM_TENANT_ID      = Tenant ID
+# then Actions > deploy-azure > Run workflow (action: apply).
+# The subscription and the kml_rg_main_* resource group are found automatically
+# (scripts/azure-login.sh). ARM_SUBSCRIPTION_ID / RESOURCE_GROUP are optional overrides.
 on:
   workflow_dispatch:
     inputs:
@@ -22,37 +28,34 @@ env:
   ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
   ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
   ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
-  ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-  RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
   TF_IN_AUTOMATION: "true"
 
 jobs:
   infra:
     name: terraform ${{ inputs.action }}
     runs-on: ubuntu-latest
-    # Create an environment called "sandbox" with yourself as required reviewer
-    # (Settings > Environments) to get a human approval before anything changes.
+    # Optional human approval: create an environment called "sandbox" with
+    # yourself as required reviewer (Settings > Environments).
     environment: sandbox
     outputs:
       webapp_name: ${{ steps.out.outputs.webapp_name }}
       webapp_url: ${{ steps.out.outputs.webapp_url }}
-    defaults: { run: { working-directory: infra/azure } }
+      resource_group: ${{ steps.out.outputs.resource_group }}
     steps:
       - uses: actions/checkout@v4
-      - name: Check sandbox secrets are set
-        run: |
-          for v in ARM_CLIENT_ID ARM_CLIENT_SECRET ARM_TENANT_ID ARM_SUBSCRIPTION_ID RESOURCE_GROUP; do
-            [ -n "${!v}" ] || { echo "::error::$v is missing. Run scripts/set-sandbox-secrets.sh"; exit 1; }
-          done
-      # The sandbox gives a service principal with a client secret and blocks
-      # federated credentials, so this uses the secret instead of OIDC.
-      - uses: azure/login@v2
-        with:
-          creds: '{"clientId":"${{ secrets.ARM_CLIENT_ID }}","clientSecret":"${{ secrets.ARM_CLIENT_SECRET }}","subscriptionId":"${{ secrets.ARM_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.ARM_TENANT_ID }}"}'
-      - run: bash ../../scripts/tf-backend.sh
+      # Logs in with the service principal secret (the playground blocks OIDC)
+      # and exports ARM_SUBSCRIPTION_ID + RESOURCE_GROUP for the steps below.
+      - name: Azure login + find playground
+        run: bash scripts/azure-login.sh
+        env:
+          SUBSCRIPTION_OVERRIDE: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          RESOURCE_GROUP_OVERRIDE: ${{ vars.RESOURCE_GROUP }}
+      - name: Terraform state storage
+        run: bash scripts/tf-backend.sh
       - uses: hashicorp/setup-terraform@v3
         with: { terraform_version: "1.9.8", terraform_wrapper: false }
       - name: terraform init
+        working-directory: infra/azure
         run: |
           terraform init -input=false \
             -backend-config="resource_group_name=$RESOURCE_GROUP" \
@@ -60,17 +63,21 @@ jobs:
             -backend-config="container_name=tfstate" \
             -backend-config="key=idp-mcp-server.tfstate"
       - name: terraform plan
+        working-directory: infra/azure
         run: |
           FLAGS=""; [ "${{ inputs.action }}" = destroy ] && FLAGS="-destroy"
           terraform plan -input=false -no-color $FLAGS -var "resource_group_name=$RESOURCE_GROUP" -out tfplan | tee plan.txt
           { echo '### Terraform plan'; echo '```'; tail -n 40 plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: terraform apply
+        working-directory: infra/azure
         run: terraform apply -input=false tfplan
       - id: out
         if: inputs.action == 'apply'
+        working-directory: infra/azure
         run: |
           echo "webapp_name=$(terraform output -raw webapp_name)" >> "$GITHUB_OUTPUT"
           echo "webapp_url=$(terraform output -raw webapp_url)" >> "$GITHUB_OUTPUT"
+          echo "resource_group=$RESOURCE_GROUP" >> "$GITHUB_OUTPUT"
 
   app:
     name: deploy server code
@@ -79,14 +86,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/login@v2
-        with:
-          creds: '{"clientId":"${{ secrets.ARM_CLIENT_ID }}","clientSecret":"${{ secrets.ARM_CLIENT_SECRET }}","subscriptionId":"${{ secrets.ARM_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.ARM_TENANT_ID }}"}'
+      - name: Azure login + find playground
+        run: bash scripts/azure-login.sh
+        env:
+          SUBSCRIPTION_OVERRIDE: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          RESOURCE_GROUP_OVERRIDE: ${{ vars.RESOURCE_GROUP }}
       # Ship only server/ (code, catalog, requirements.txt). App Service runs pip install.
-      - uses: azure/webapps-deploy@v3
-        with:
-          app-name: ${{ needs.infra.outputs.webapp_name }}
-          package: server
+      - name: Zip deploy server/
+        run: |
+          (cd server && zip -qr ../server.zip . -x 'tests/*' '**/__pycache__/*')
+          az webapp deploy -g "${{ needs.infra.outputs.resource_group }}" \
+            -n "${{ needs.infra.outputs.webapp_name }}" --src-path server.zip --type zip --timeout 600000
       - name: Smoke test
         run: |
           BASE="${{ needs.infra.outputs.webapp_url }}"
@@ -96,4 +106,8 @@ jobs:
             sleep 10
           done
           bash scripts/smoke-test.sh "$BASE"
-          echo "### MCP server live at $BASE/mcp" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### MCP server is live"
+            echo "- MCP endpoint: $BASE/mcp"
+            echo "- Health: $BASE/healthz"
+          } >> "$GITHUB_STEP_SUMMARY"
