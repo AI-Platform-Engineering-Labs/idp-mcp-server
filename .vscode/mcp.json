@@ -1,0 +1,30 @@
+{
+  // VS Code (Copilot agent mode) MCP servers for this repo.
+  // Pick ONE in the MCP: List Servers view and click Start.
+  "servers": {
+    // 1) stdio: VS Code starts the container itself and talks over stdin/stdout.
+    //    Build the image first: docker build -t idp-mcp-server:local .
+    "idp-local-stdio": {
+      "type": "stdio",
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "idp-mcp-server:local", "--transport", "stdio"]
+    },
+    // 2) HTTP: the server is already running (docker compose up / terraform apply in infra/local).
+    "idp-local-http": {
+      "type": "http",
+      "url": "http://localhost:8000/mcp"
+    },
+    // 3) Azure: paste the webapp_url output from the deploy workflow.
+    "idp-azure": {
+      "type": "http",
+      "url": "${input:azureUrl}/mcp"
+    }
+  },
+  "inputs": [
+    {
+      "id": "azureUrl",
+      "type": "promptString",
+      "description": "Azure web app URL, e.g. https://idpmcp-abc123.azurewebsites.net"
+    }
+  ]
+}
