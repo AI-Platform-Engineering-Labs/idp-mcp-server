@@ -1,7 +1,7 @@
 name: images
 
 # Builds the Backstage and MCP server images and publishes them to GitHub's
-# container registry (GHCR) on every merge to main. AKS and the local
+# container registry (GHCR) on every merge to main, for amd64 (AKS, Intel) and arm64 (Apple Silicon). AKS and the local
 # Terraform stack (image_source = "ghcr") pull them from there.
 # Why GHCR: the KodeKloud playground blocks ACR build tasks and role assignments
 # (so AKS can't be attached to an ACR), but it can pull public images.
@@ -28,6 +28,8 @@ jobs:
             context: .
     steps:
       - uses: actions/checkout@v4
+      # QEMU lets the amd64 runner build the arm64 variant (Apple Silicon Macs).
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -37,6 +39,8 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
+          # amd64 = AKS, Intel/Windows/Linux; arm64 = Apple Silicon Macs
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ghcr.io/ai-platform-engineering-labs/${{ matrix.image }}:latest
