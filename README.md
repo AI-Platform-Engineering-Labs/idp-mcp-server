@@ -222,6 +222,9 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$PWD/server:/src" -w /src python:3.12-sli
 
 ## Deploy to Azure AKS (KodeKloud playground)
 
+> **Step-by-step runbook** with every value, where to get it, the demo script, a "real world" comparison
+> and troubleshooting: **[docs/runbook-aks.md](docs/runbook-aks.md)**.
+
 ### What the playground allows, and how this repo deals with it
 
 From [kodekloud.com/cloud-playgrounds/azure](https://kodekloud.com/cloud-playgrounds/azure):
@@ -260,7 +263,8 @@ From [kodekloud.com/cloud-playgrounds/azure](https://kodekloud.com/cloud-playgro
 
    (Or from Git Bash: `export ARM_CLIENT_ID=... ARM_CLIENT_SECRET=... ARM_TENANT_ID=...` then
    `bash scripts/set-sandbox-secrets.sh`.)
-3. **Actions → deploy-azure → Run workflow** (`action: apply`), or
+3. **Actions → deploy-azure → Run workflow**: first `action: preflight` (read-only checks, 1 minute),
+   then `action: apply`. Or `gh workflow run deploy-azure -f action=preflight`, then
    `gh workflow run deploy-azure -f action=apply && gh run watch`.
 
 The run takes about **12-15 minutes**:

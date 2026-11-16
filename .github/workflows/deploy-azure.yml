@@ -7,7 +7,8 @@ name: deploy-azure
 #   ARM_CLIENT_ID      = Application / Client ID
 #   ARM_CLIENT_SECRET  = Client secret
 #   ARM_TENANT_ID      = Tenant ID
-# then Actions > deploy-azure > Run workflow (action: apply).
+# then Actions > deploy-azure > Run workflow. Run action = preflight first (read-only checks),
+# then action = apply. Full runbook: docs/runbook-aks.md.
 # The subscription and the kml_rg_main_* resource group are found automatically
 # (scripts/azure-login.sh). ARM_SUBSCRIPTION_ID / RESOURCE_GROUP are optional overrides.
 #
@@ -16,10 +17,10 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "apply = create/update AKS and deploy; destroy = remove the resources"
+        description: "preflight = read-only checks; apply = create/update AKS and deploy; destroy = remove the resources"
         type: choice
-        options: [apply, destroy]
-        default: apply
+        options: [preflight, apply, destroy]
+        default: preflight
       image_tag:
         description: "Image tag to deploy (latest, or a commit SHA from the images workflow)"
         type: string
@@ -38,8 +39,25 @@ env:
   REGISTRY: ghcr.io/ai-platform-engineering-labs
 
 jobs:
+  preflight:
+    name: preflight (read-only)
+    if: inputs.action == 'preflight'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Azure login + find playground
+        run: bash scripts/azure-login.sh
+        env:
+          SUBSCRIPTION_OVERRIDE: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          RESOURCE_GROUP_OVERRIDE: ${{ vars.RESOURCE_GROUP }}
+      - name: Checks
+        run: bash scripts/preflight.sh
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+
   infra:
     name: terraform ${{ inputs.action }} (AKS)
+    if: inputs.action != 'preflight'
     runs-on: ubuntu-latest
     # Optional human approval: create an environment called "sandbox" with
     # yourself as required reviewer (Settings > Environments).
