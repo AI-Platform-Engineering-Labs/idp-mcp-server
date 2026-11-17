@@ -16,7 +16,16 @@ def _text(result) -> str:
 @pytest.mark.asyncio
 async def test_tools_are_registered():
     names = {t.name for t in await mcp.list_tools()}
-    assert {"hello", "list_services", "call_service"} <= names
+    assert {
+        "hello",
+        "list_services",
+        "get_service",
+        "get_service_status",
+        "list_teams",
+        "create_service",
+        "get_request_status",
+    } <= names
+    assert "call_service" not in names  # agents no longer call business services directly
 
 
 @pytest.mark.asyncio

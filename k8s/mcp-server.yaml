@@ -26,6 +26,8 @@ spec:
             - {name: BACKSTAGE_URL, value: "http://backstage:7007"}
             - name: BACKSTAGE_TOKEN
               valueFrom: {secretKeyRef: {name: idp-tokens, key: mcp-backstage-token}}
+            - name: ADMIN_TOKEN   # human approval of write actions (scripts/approve.sh)
+              valueFrom: {secretKeyRef: {name: idp-tokens, key: admin-token, optional: true}}
           resources:
             requests: {cpu: 50m, memory: 96Mi}
             limits: {memory: 256Mi}

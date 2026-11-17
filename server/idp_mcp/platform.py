@@ -1,6 +1,7 @@
 """The IDP the MCP server talks to.
 
-Two backends, same functions:
+Read functions (list_services, get_service, get_service_status, list_teams) and the
+validation for the create_service write action live here. Two backends, same functions:
   * Backstage (BACKSTAGE_URL set): services come from the Backstage catalog API, and
     service calls go through the Backstage proxy. The sample services have no public
     address, so Backstage is the only way in ("reachable via the IDP only").
@@ -48,8 +49,6 @@ def _from_entity(e: dict) -> dict:
         "lifecycle": spec.get("lifecycle", ""),
         "type": spec.get("type", ""),
         "tier": meta.get("annotations", {}).get("idp.demo/tier", ""),
-        # Default deny: anything not explicitly labelled "open" is guarded.
-        "ai_access": meta.get("annotations", {}).get("idp.demo/ai-access", "guarded"),
     }
 
 
@@ -70,27 +69,87 @@ def list_services() -> list[dict]:
     return [_from_entity(e) for e in r.json().get("items", [])]
 
 
-def call_service(name: str, path: str = "/") -> dict:
-    """GET a service through the Backstage proxy (/api/proxy/svc/<name>)."""
+def _require_service(name: str) -> dict:
     if not NAME_RE.match(name):
         raise PlatformError("Invalid service name.")
     services = {s["name"]: s for s in list_services()}
     if name not in services:
         raise PlatformError(f"Unknown service '{name}'. Known services: {sorted(services)}")
-    if services[name].get("ai_access", "guarded") != "open":
-        open_names = sorted(n for n, s in services.items() if s.get("ai_access") == "open")
-        raise PlatformError(
-            f"'{name}' is guarded: AI agents may not call it. A human must do this "
-            f"through Backstage. Services open to agents: {open_names}"
-        )
-    if not path.startswith("/") or ".." in path or "//" in path:
-        raise PlatformError("Path must start with '/' and must not contain '..' or '//'.")
+    return services[name]
 
+
+def get_service(name: str) -> dict:
+    """One service from the catalog, with a bit more detail than list_services."""
+    summary = _require_service(name)
+    base = backstage_url()
+    if not base:
+        return summary
+    try:
+        r = httpx.get(
+            f"{base}/api/catalog/entities/by-name/component/default/{name}",
+            headers=_headers(),
+            timeout=TIMEOUT,
+        )
+        r.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise PlatformError(f"Backstage catalog is not reachable: {exc}") from exc
+    entity = r.json()
+    detail = _from_entity(entity)
+    detail["tags"] = entity.get("metadata", {}).get("tags", [])
+    detail["links"] = entity.get("metadata", {}).get("links", [])
+    return detail
+
+
+def get_service_status(name: str) -> dict:
+    """Is the service up? The platform asks it through the Backstage proxy and reports only
+    healthy/unhealthy and the HTTP status: no body, no caller-chosen path."""
+    _require_service(name)
     base = backstage_url()
     if not base:
         raise PlatformError("No platform configured (BACKSTAGE_URL is not set).")
     try:
-        r = httpx.get(f"{base}/api/proxy/svc/{name}{path}", headers=_headers(), timeout=TIMEOUT)
+        r = httpx.get(f"{base}/api/proxy/svc/{name}/", headers=_headers(), timeout=TIMEOUT)
     except httpx.HTTPError as exc:
-        raise PlatformError(f"Could not reach {name} through Backstage: {exc}") from exc
-    return {"service": name, "path": path, "status": r.status_code, "body": r.text[:2000]}
+        return {"service": name, "healthy": False, "http_status": None, "error": str(exc)}
+    return {"service": name, "healthy": r.status_code < 400, "http_status": r.status_code}
+
+
+def list_teams() -> list[dict]:
+    """Teams (Backstage groups) and the services each one owns."""
+    services = list_services()
+    base = backstage_url()
+    if base:
+        try:
+            r = httpx.get(
+                f"{base}/api/catalog/entities/by-query",
+                params={"filter": "kind=group", "limit": 100},
+                headers=_headers(),
+                timeout=TIMEOUT,
+            )
+            r.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise PlatformError(f"Backstage catalog is not reachable: {exc}") from exc
+        names = [e["metadata"]["name"] for e in r.json().get("items", [])]
+    else:
+        names = sorted({s["owner"] for s in services if s.get("owner")})
+    return [
+        {"team": t, "services": sorted(s["name"] for s in services if s.get("owner") == t)}
+        for t in sorted(names)
+    ]
+
+
+# Golden paths: the only templates the platform lets an agent ask for.
+TEMPLATES = ("python-service", "node-service")
+
+
+def validate_new_service(template: str, name: str, owner: str) -> None:
+    """Check a create_service request before it is queued for human approval."""
+    if template not in TEMPLATES:
+        raise PlatformError(f"Unknown template '{template}'. Allowed templates: {list(TEMPLATES)}")
+    if not NAME_RE.match(name):
+        raise PlatformError("Service name must be lowercase letters, digits and '-' (max 63).")
+    if name in {s["name"] for s in list_services()}:
+        raise PlatformError(f"A service called '{name}' already exists.")
+    teams = [t["team"] for t in list_teams()]
+    if owner not in teams:
+        raise PlatformError(f"Unknown team '{owner}'. Known teams: {teams}")

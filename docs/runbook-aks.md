@@ -106,7 +106,7 @@ it asks. The jobs and what they do:
 | `k8s` → Get cluster credentials, Shared token | Creates namespace `idp` and a random token Backstage and the MCP server share, kept as a Kubernetes secret | |
 | `k8s` → Apply manifests | Deploys Backstage, the MCP server and the 3 services from `k8s/` | |
 | `k8s` → Wait for public IPs, Tell Backstage its URL | Waits for the two load balancers and sets Backstage's address | |
-| `k8s` → Smoke test through the MCP server | Calls `list_services` and `call_service` like an agent would | |
+| `k8s` → Smoke test through the MCP server | Calls the read tools, queues a `create_service` request and approves it with the admin token, like an agent plus a human would | |
 | `k8s` → Show that services are reachable only via the IDP | Proves a direct call to `payments-api` is blocked | a warning here means the network policy isn't enforced |
 
 ### Step 4: Verify
@@ -140,7 +140,7 @@ secrets: `bash scripts/sandbox-down.sh`.
 | 1 | Show Backstage's catalog | "This is the IDP: what exists and who owns it." |
 | 2 | Show `kubectl get svc` or the architecture diagram: the 3 services have no public IP | "The services can't be reached except through the platform." |
 | 3 | In Copilot: *"Which services does team-payments own?"* | The agent calls the MCP tool `list_services`, which asks Backstage. |
-| 4 | *"Is payments-api healthy?"* | `call_service` goes MCP → Backstage proxy → service. |
+| 4 | *"Is payments-api healthy?"* | `get_service_status` goes MCP → Backstage proxy → service; the agent only sees healthy/unhealthy. |
 | 5 | Try to reach a service directly from your laptop (it fails) | Only the IDP is a door, and the agent uses the same door as a human. |
 | 6 | Show the MCP token's limits (`docs/architecture.md`, "Guardrails") | The agent has a narrow token, not cluster access. |
 
@@ -180,7 +180,7 @@ Say this honestly in the talk, it's a strength:
 | "No public IP for backstage after 5 minutes" | The playground allows only 3 load balancers per session | Check for leftover load balancers; destroy and re-run |
 | Backstage pod `Pending` | Not enough memory on the nodes | `kubectl -n idp describe pod`; make sure both nodes are up (`node_count = 2`) |
 | Backstage opens but shows errors / blank page | `BACKSTAGE_BASE_URL` doesn't match the URL in your browser | The workflow sets it; re-run `apply`, and open the exact URL from the summary |
-| Smoke test: `call_service` fails | Backstage still starting, or the token doesn't match | Wait a minute and re-run `scripts/smoke-test.sh`; re-run `apply` |
+| Smoke test: `get_service_status` fails | Backstage still starting, or the token doesn't match | Wait a minute and re-run `scripts/smoke-test.sh`; re-run `apply` |
 | Warning "payments-api answered a direct call" | Network policy isn't enforced | Check the cluster uses the Cilium network policy (`infra/azure/main.tf`) |
 | Same secret works yesterday, fails today | Playground sessions are short-lived | Start a new one and update the secrets |
 
