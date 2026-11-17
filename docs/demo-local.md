@@ -31,6 +31,7 @@ change something, a human decides, outside the agent's reach.*
 
 | # | You do | You say |
 |---|---|---|
+| 0 | Browser: Backstage > **Docs** > Skyline Engineering Handbook (first open builds it, about 30 seconds). Click a golden path and a runbook. Then **Create**: three golden-path templates | "This is what the company knows, in the portal. 21 articles on onboarding, golden paths, standards and runbooks. None of it is on the internet." |
 | 0a | Ask: *"What is our deploy freeze policy, and how do I roll back a bad release?"* | "These are Skyline's own rules. A public model cannot know them. The agent looked them up with `search_docs` and `get_doc` and named the articles." |
 | 0b | Ask: *"What golden paths can I use for a new service?"* | "`list_templates`: the same templates you see under Create in the portal." |
 
@@ -38,7 +39,7 @@ change something, a human decides, outside the agent's reach.*
 
 | # | You do | You say |
 |---|---|---|
-| 1 | Backstage > Catalog: 4 services with owners, tiers, dependencies | "This is the IDP: what exists, who owns it, what depends on what." |
+| 1 | Backstage > Catalog: services, APIs, databases and teams, with owners, tiers and dependencies (try the Catalog Graph) | "This is the IDP: what exists, who owns it, what depends on what." |
 | 2 | Terminal: `curl localhost:5678` fails; `curl -H "Authorization: Bearer local-dev-token-change-me" localhost:7007/api/proxy/svc/orders-web/` answers | "The services have no door except the platform." |
 | 3 | Break something live: `docker stop payments-api` | "Payments just went down. Checkout is failing." |
 | 4 | Ask: *"Checkout is failing. Check the health of every service, find what is down, tell me who owns it, who is on call, which services are affected, and what our runbook says to do."* | "The agent chains MCP tools: `get_service_status`, `get_service`, then `search_docs` for the runbook. No dashboards, no tickets." |

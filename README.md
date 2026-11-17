@@ -45,7 +45,7 @@ That's the "MCP is the new API" idea of the talk.
 | `get_service` | read | One service's owner, tier, lifecycle, tags and links | ✅ |
 | `get_service_status` | read | Is it healthy? The platform checks it through the Backstage proxy and returns only healthy/unhealthy, never the service's data | ✅ |
 | `list_teams` | read | Teams and the services each owns | ✅ |
-| `search_docs`, `get_doc` | read | Search and read the internal knowledge base (21 fictional how-tos, golden paths, standards, onboarding, runbooks in `server/knowledge`) | ✅ |
+| `search_docs`, `get_doc` | read | Search and read the internal knowledge base (21 fictional how-tos, golden paths, standards, onboarding, runbooks in `backstage/catalog/docs/docs`) | ✅ |
 | `list_templates` | read | The software templates (golden paths) from Backstage | ✅ |
 | `create_service` | **write, needs a human** | Ask for a new service from a golden-path template. Only **queues a request**: nothing is created until a human approves | ✅ (the action itself is a placeholder) |
 | `get_request_status` | read | Pending, approved or denied | ✅ |

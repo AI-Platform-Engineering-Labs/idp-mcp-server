@@ -11,7 +11,7 @@ RUN pip install -r requirements.txt
 
 COPY server/idp_mcp ./idp_mcp
 COPY server/catalog ./catalog
-COPY server/knowledge ./knowledge
+COPY backstage/catalog/docs/docs ./knowledge
 
 # Run as a non-root user (least privilege starts at the container).
 RUN useradd --create-home --uid 10001 mcp

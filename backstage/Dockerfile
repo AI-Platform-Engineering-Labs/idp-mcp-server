@@ -1,6 +1,7 @@
 # Backstage image, built entirely inside Docker (no Node.js needed on your laptop).
 # Based on the multi-stage build from https://backstage.io/docs/deployment/docker
-# No apt packages needed: the SQLite driver (better-sqlite3) ships prebuilt binaries.
+# The only system packages are Python + mkdocs: TechDocs renders the handbook (Docs tab) inside
+# the portal itself. The SQLite driver (better-sqlite3) ships prebuilt binaries.
 # No BuildKit-only syntax, so Terraform's Docker provider can build it too.
 # Build:  docker build -t idp-backstage:local backstage/      (takes ~10 minutes the first time)
 
@@ -38,6 +39,12 @@ RUN mkdir packages/backend/dist/skeleton packages/backend/dist/bundle \
 
 # ---- 2. small runtime image with production dependencies only
 FROM node:22-bookworm-slim
+# TechDocs generates the handbook site with mkdocs (run locally, not in Docker-in-Docker).
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/mkdocs \
+    && /opt/mkdocs/bin/pip install --no-cache-dir "mkdocs-techdocs-core==1.7.1" "mkdocs<2"
+ENV PATH="/opt/mkdocs/bin:${PATH}"
 RUN mkdir -p /app && chown node:node /app
 USER node
 WORKDIR /app
