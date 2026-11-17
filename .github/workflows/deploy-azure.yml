@@ -166,6 +166,8 @@ jobs:
             --from-literal=BACKSTAGE_BASE_URL="http://${{ steps.ips.outputs.backstage }}" \
             --dry-run=client -o yaml | kubectl apply -f -
           kubectl -n idp rollout restart deployment/backstage
+          # Images are :latest, so restart to pick up a new build (the MCP server holds the guardrail code).
+          kubectl -n idp rollout restart deployment/mcp-server
       - name: Wait for rollouts
         run: |
           for d in payments-api customers-api orders-web notifications-worker mcp-server backstage; do
