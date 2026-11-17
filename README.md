@@ -69,7 +69,7 @@ prompt-injection demo.
  │ you / audience   │ ───────────────────────────────────────────────────────────────▶          │  /svc/<name>│
  └──────────────────┘   http://<ip>            │                                                 ▼            │
                                                │   ┌──────────────┐ ┌──────────────┐ ┌──────────────────────┐ │
-                                               │   │ payments-api │ │  orders-web  │ │ notifications-worker │ │
+                                               │   │ payments-api │ │  orders-web  │ │ notifications-worker │ │  (+ customers-api)
                                                │   └──────────────┘ └──────────────┘ └──────────────────────┘ │
                                                │   ClusterIP only, NetworkPolicy: ingress from Backstage only  │
                                                └──────────────────────────────────────────────────────────────┘
@@ -306,6 +306,21 @@ Then in Copilot Chat (Agent mode) try:
 - *"Which services does team-payments own?"* → `list_services`
 - *"Check if every service in the shop system is healthy."* → `list_services` + `call_service` ×3
 - *"Call notifications-worker and tell me who owns it."*
+- *"Call payments-api."* → refused: it is **guarded** (see below)
+
+### Which services an agent may call (guardrail)
+
+Four sample services run behind Backstage. Each has an `idp.demo/ai-access` annotation in
+`backstage/catalog/services.yaml`:
+
+| Service | `ai-access` | What the agent sees |
+|---|---|---|
+| `orders-web`, `notifications-worker` | `open` | `call_service` works |
+| `payments-api`, `customers-api` | `guarded` | listed in the catalog, but `call_service` is refused with a clear message |
+
+The check is in the MCP server (`server/idp_mcp/platform.py`), before any request is made.
+A service with no annotation is guarded (default deny). To open or close a service, change the
+annotation and restart Backstage. `scripts/smoke-test.sh` proves both sides.
 
 **Claude Desktop / Claude Code**: add an HTTP MCP server with the same URL
 (Claude Code: `claude mcp add --transport http idp http://localhost:8000/mcp`).

@@ -40,6 +40,7 @@ curl -X POST http://localhost:8000/mcp \
 | **Least-privilege token** for the MCP server | `backstage/app-config.yaml` → `backend.auth.externalAccess` | A static token whose `accessRestrictions` allow only the `catalog` and `proxy` plugins. Checked locally: catalog 200, proxy 200, search 403, scaffolder 403, no token 401. |
 | **Only catalog services** can be called | `server/idp_mcp/platform.py` | `call_service` checks the name against the catalog and rejects paths with `..`, `//` or no leading `/`. No URL from the model is ever fetched directly. |
 | **Read-only** tool hints | `server/idp_mcp/server.py` | `ToolAnnotations(readOnlyHint=True)`. Clients can skip confirmation for these. Write tools (roadmap) will be `destructiveHint=True`. Hints are advisory, so enforcement stays on the server side. |
+| **Guarded services refused** | `server/idp_mcp/platform.py`, `backstage/catalog/services.yaml` | Each catalog entry has `idp.demo/ai-access: open\|guarded`. `call_service` refuses anything not `open` (default deny) before sending a request. The agent still sees guarded services in `list_services`. Real approval for them comes later on the roadmap. |
 | **Errors the agent can read** | `PlatformError(ToolError)` | Expected failures (unknown service, Backstage down) become a clear `isError` result; unexpected crashes are logged but their details are not shown to the model. |
 | No cluster credentials for the agent | the whole design | The MCP server pod has no Kubernetes service account token (`automountServiceAccountToken: false`). |
 

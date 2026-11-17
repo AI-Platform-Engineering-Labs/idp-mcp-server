@@ -3,8 +3,9 @@
 # Usage: bash scripts/smoke-test.sh [mcp-base-url]   (default http://localhost:8000)
 #   1. /healthz answers
 #   2. list_services returns the catalog (from Backstage when it is connected)
-#   3. call_service reaches payments-api through the Backstage proxy
+#   3. call_service reaches orders-web (ai-access: open) through the Backstage proxy
 #      (skipped when the server runs without Backstage)
+#   4. call_service refuses payments-api (ai-access: guarded)
 set -euo pipefail
 BASE="${1:-http://localhost:8000}"
 
@@ -28,12 +29,20 @@ done
 echo "$OUT" | grep -q 'payments-api' || { echo "FAIL: list_services: $OUT" >&2; exit 1; }
 echo "OK: list_services returned the catalog"
 
-echo "== call_service payments-api (through the IDP)"
-OUT=$(call call_service '{"name":"payments-api"}')
+echo "== call_service orders-web (open to agents, through the IDP)"
+OUT=$(call call_service '{"name":"orders-web"}')
 if echo "$OUT" | grep -q 'BACKSTAGE_URL is not set'; then
-  echo "SKIP: server is not connected to Backstage"
+  echo "SKIP: server is not connected to Backstage"; exit 0
 elif echo "$OUT" | grep -q 'healthy'; then
-  echo "OK: payments-api answered through Backstage"
+  echo "OK: orders-web answered through Backstage"
 else
-  echo "FAIL: call_service: $OUT" >&2; exit 1
+  echo "FAIL: call_service orders-web: $OUT" >&2; exit 1
+fi
+
+echo "== call_service payments-api (guarded: must be refused)"
+OUT=$(call call_service '{"name":"payments-api"}')
+if echo "$OUT" | grep -q 'guarded' && ! echo "$OUT" | grep -q 'healthy'; then
+  echo "OK: payments-api refused for the agent"
+else
+  echo "FAIL: guarded service was not refused: $OUT" >&2; exit 1
 fi

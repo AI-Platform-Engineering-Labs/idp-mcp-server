@@ -4,15 +4,24 @@ services:
   - name: payments-api
     owner: team-payments
     tier: critical
+    ai_access: guarded
     repo: AI-Platform-Engineering-Labs/payments-api
     runtime: python
+  - name: customers-api
+    owner: team-payments
+    tier: critical
+    ai_access: guarded
+    repo: AI-Platform-Engineering-Labs/customers-api
+    runtime: java
   - name: orders-web
     owner: team-storefront
     tier: standard
+    ai_access: open
     repo: AI-Platform-Engineering-Labs/orders-web
     runtime: node
   - name: notifications-worker
     owner: team-platform
     tier: standard
+    ai_access: open
     repo: AI-Platform-Engineering-Labs/notifications-worker
     runtime: go
