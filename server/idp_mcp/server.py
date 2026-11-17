@@ -1,7 +1,8 @@
 """The MCP server.
 
 Platform actions for an AI agent, backed by the IDP (Backstage) through idp_mcp.platform:
-  * open, read-only:  hello, list_services, get_service, get_service_status, list_teams
+  * open, read-only:  hello, list_services, get_service, get_service_status, list_teams,
+                      search_docs, get_doc, list_templates
   * needs a human:    create_service (queues a request), get_request_status
 A human approves or denies a request through the admin endpoint (scripts/approve.sh).
 
@@ -20,14 +21,17 @@ from mcp.types import ToolAnnotations
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from idp_mcp import __version__, approvals, platform
+from idp_mcp import __version__, approvals, docs, platform
 
 mcp = MCPServer(
     name="idp-mcp-server",
     version=__version__,
     instructions=(
-        "Tools for the Internal Developer Platform. Read tools (list_services, get_service, "
-        "get_service_status, list_teams) are safe to call. create_service does NOT create "
+        "Tools for the Internal Developer Platform. For questions about how things are done at "
+        "the company, search the knowledge base first (search_docs, then get_doc) and answer "
+        "from it, naming the article. Read tools (list_services, get_service, "
+        "get_service_status, list_teams, search_docs, get_doc, list_templates) are safe to "
+        "call. create_service does NOT create "
         "anything: it queues a request that a human must approve. After calling it, tell the "
         "user the request id and that approval is needed; use get_request_status to check."
     ),
@@ -75,6 +79,29 @@ def get_service_status(name: str) -> dict:
 def list_teams() -> list[dict]:
     """List the teams on the platform and the services each team owns."""
     return platform.list_teams()
+
+
+@mcp.tool(annotations=READ_ONLY)
+def search_docs(query: str = "", category: str | None = None, limit: int = 5) -> list[dict]:
+    """Search the company's internal knowledge base (how-tos, golden paths, standards,
+    onboarding, runbooks). This is Skyline-internal knowledge, not on the internet: use it
+    before answering questions about how things are done here. Returns the best matches with
+    a slug and snippet; use get_doc for the full article. Categories: onboarding, golden-paths,
+    standards, runbooks, how-to. An empty query lists articles."""
+    return docs.search(query, category, limit)
+
+
+@mcp.tool(annotations=READ_ONLY)
+def get_doc(slug: str) -> dict:
+    """Read one knowledge-base article in full. The slug comes from search_docs."""
+    return docs.get(slug)
+
+
+@mcp.tool(annotations=READ_ONLY)
+def list_templates() -> list[dict]:
+    """List the software templates (golden paths) the platform offers for new services.
+    create_service accepts only these template names."""
+    return platform.list_templates()
 
 
 @mcp.tool(annotations=WRITE_NEEDS_APPROVAL)

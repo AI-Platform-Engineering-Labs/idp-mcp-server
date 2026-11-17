@@ -27,6 +27,13 @@ Open these windows: Backstage http://localhost:7007 (Enter as guest), the AI cli
 around the platform freely, work out what is broken and who to call, but when it wants to
 change something, a human decides, outside the agent's reach.*
 
+## Act 0: knowledge that is not on the internet (about 2 minutes)
+
+| # | You do | You say |
+|---|---|---|
+| 0a | Ask: *"What is our deploy freeze policy, and how do I roll back a bad release?"* | "These are Skyline's own rules. A public model cannot know them. The agent looked them up with `search_docs` and `get_doc` and named the articles." |
+| 0b | Ask: *"What golden paths can I use for a new service?"* | "`list_templates`: the same templates you see under Create in the portal." |
+
 ## Act 1: an incident (about 4 minutes)
 
 | # | You do | You say |
@@ -34,7 +41,7 @@ change something, a human decides, outside the agent's reach.*
 | 1 | Backstage > Catalog: 4 services with owners, tiers, dependencies | "This is the IDP: what exists, who owns it, what depends on what." |
 | 2 | Terminal: `curl localhost:5678` fails; `curl -H "Authorization: Bearer local-dev-token-change-me" localhost:7007/api/proxy/svc/orders-web/` answers | "The services have no door except the platform." |
 | 3 | Break something live: `docker stop payments-api` | "Payments just went down. Checkout is failing." |
-| 4 | Ask: *"Checkout is failing. Check the health of every service, find what is down, tell me who owns it, who is on call, and which other services are affected."* | "The agent uses MCP tools: `list_services`, `get_service_status`, `get_service`. No dashboards, no tickets." |
+| 4 | Ask: *"Checkout is failing. Check the health of every service, find what is down, tell me who owns it, who is on call, which services are affected, and what our runbook says to do."* | "The agent chains MCP tools: `get_service_status`, `get_service`, then `search_docs` for the runbook. No dashboards, no tickets." |
 | 5 | Show the answer: payments-api is down, team-payments owns it, the on-call contact, and orders-web (and notifications-worker through it) are affected | "Ownership, on-call and dependencies came from the catalog. That is the value of an IDP, now reachable by an agent." |
 | 6 | Terminal: `docker start payments-api`, then ask *"Is everything healthy again?"* | "Fixed. The agent only looked. It could not touch anything." |
 

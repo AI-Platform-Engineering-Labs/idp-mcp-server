@@ -24,6 +24,9 @@ async def test_tools_are_registered():
         "list_teams",
         "create_service",
         "get_request_status",
+        "search_docs",
+        "get_doc",
+        "list_templates",
     } <= names
     assert "call_service" not in names  # agents no longer call business services directly
 

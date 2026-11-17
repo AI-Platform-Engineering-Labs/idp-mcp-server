@@ -29,8 +29,10 @@ spec:
   lifecycle: production
   owner: team-payments
   system: shop
+  providesApis: [payments-openapi]
   dependsOn:
     - component:customers-api
+    - resource:payments-db
 ---
 apiVersion: backstage.io/v1alpha1
 kind: Component
@@ -67,6 +69,7 @@ spec:
   lifecycle: production
   owner: team-storefront
   system: shop
+  consumesApis: [payments-openapi]
   dependsOn:
     - component:payments-api
     - component:customers-api
@@ -102,3 +105,41 @@ spec:
   lifecycle: experimental
   owner: team-platform
   system: shop
+---
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: payments-db
+  description: PostgreSQL database for payments (managed service, restricted data)
+spec:
+  type: database
+  owner: team-payments
+  system: shop
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: payments-openapi
+  description: Public contract of payments-api (create and capture payments, idempotent)
+  tags: [openapi, payments]
+spec:
+  type: openapi
+  lifecycle: production
+  owner: team-payments
+  system: shop
+  definition: |
+    openapi: 3.0.3
+    info:
+      title: payments-api
+      version: 1.0.0
+    paths:
+      /v1/payments:
+        post:
+          summary: Create a payment (requires an Idempotency-Key header)
+          responses:
+            "201": {description: Created}
+      /healthz:
+        get:
+          summary: Health check
+          responses:
+            "200": {description: OK}

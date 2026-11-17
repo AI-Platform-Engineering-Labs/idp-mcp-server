@@ -103,8 +103,15 @@ def get_service(name: str) -> dict:
     relations = entity.get("relations", [])
 
     def related(kind: str) -> list[str]:
-        refs = [r.get("targetRef", "") for r in relations if r.get("type") == kind]
-        return sorted(ref.rsplit("/", 1)[-1] for ref in refs if ref.startswith("component:"))
+        # components by plain name, other kinds as "resource:name" / "api:name"
+        out = []
+        for r in relations:
+            if r.get("type") != kind:
+                continue
+            ref_kind, _, rest = r.get("targetRef", "").partition(":")
+            name = rest.rsplit("/", 1)[-1]
+            out.append(name if ref_kind == "component" else f"{ref_kind}:{name}")
+        return sorted(out)
 
     # What this service needs, and what breaks if it goes down.
     detail["depends_on"] = related("dependsOn")
@@ -150,14 +157,54 @@ def list_teams() -> list[dict]:
     ]
 
 
-# Golden paths: the only templates the platform lets an agent ask for.
-TEMPLATES = ("python-service", "node-service")
+# Fallback golden paths when there is no Backstage (unit tests, stdio without a platform).
+FALLBACK_TEMPLATES = (
+    {
+        "name": "python-service",
+        "title": "Python service",
+        "description": "FastAPI service",
+        "type": "service",
+    },
+    {
+        "name": "node-service",
+        "title": "Node service",
+        "description": "Node.js web service",
+        "type": "service",
+    },
+)
+
+
+def list_templates() -> list[dict]:
+    """Software templates (Backstage Template entities): the golden paths."""
+    base = backstage_url()
+    if not base:
+        return [dict(t) for t in FALLBACK_TEMPLATES]
+    try:
+        r = httpx.get(
+            f"{base}/api/catalog/entities/by-query",
+            params={"filter": "kind=template", "limit": 100},
+            headers=_headers(),
+            timeout=TIMEOUT,
+        )
+        r.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise PlatformError(f"Backstage catalog is not reachable: {exc}") from exc
+    return [
+        {
+            "name": e["metadata"]["name"],
+            "title": e["metadata"].get("title", e["metadata"]["name"]),
+            "description": e["metadata"].get("description", ""),
+            "type": e.get("spec", {}).get("type", ""),
+        }
+        for e in r.json().get("items", [])
+    ]
 
 
 def validate_new_service(template: str, name: str, owner: str) -> None:
     """Check a create_service request before it is queued for human approval."""
-    if template not in TEMPLATES:
-        raise PlatformError(f"Unknown template '{template}'. Allowed templates: {list(TEMPLATES)}")
+    templates = [t["name"] for t in list_templates()]
+    if template not in templates:
+        raise PlatformError(f"Unknown template '{template}'. Allowed templates: {templates}")
     if not NAME_RE.match(name):
         raise PlatformError("Service name must be lowercase letters, digits and '-' (max 63).")
     if name in {s["name"] for s in list_services()}:

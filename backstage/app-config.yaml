@@ -200,11 +200,13 @@ catalog:
     entityFilename: catalog-info.yaml
     pullRequestBranchName: backstage-integration
   rules:
-    - allow: [Component, System, API, Resource, Location]
+    - allow: [Component, System, API, Resource, Location, Template]
   locations:
     # Our demo catalog (backstage/catalog). Paths are relative to packages/backend in dev.
     - type: file
       target: ../../catalog/services.yaml
+    - type: file
+      target: ../../catalog/templates.yaml
     - type: file
       target: ../../catalog/org.yaml
       rules:

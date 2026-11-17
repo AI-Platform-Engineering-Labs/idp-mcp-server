@@ -18,6 +18,7 @@ COMPONENTS = {
             "spec": {"owner": "group:team-payments", "system": "shop", "lifecycle": "production"},
             "relations": [
                 {"type": "dependsOn", "targetRef": "component:default/customers-api"},
+                {"type": "dependsOn", "targetRef": "resource:default/payments-db"},
                 {"type": "dependencyOf", "targetRef": "component:default/orders-web"},
                 {"type": "ownedBy", "targetRef": "group:default/team-payments"},
             ],
@@ -27,6 +28,15 @@ COMPONENTS = {
             "metadata": {"name": "orders-web"},
             "spec": {"owner": "team-storefront", "system": "shop"},
         },
+    ]
+}
+TEMPLATES = {
+    "items": [
+        {
+            "metadata": {"name": "python-service", "title": "Python service"},
+            "spec": {"type": "service"},
+        },
+        {"metadata": {"name": "node-service"}, "spec": {"type": "website"}},
     ]
 }
 GROUPS = {
@@ -46,7 +56,8 @@ def fake_backstage(monkeypatch):
         calls.append({"url": url, "params": params, "headers": headers})
         req = httpx.Request("GET", url)
         if url.endswith("/api/catalog/entities/by-query"):
-            body = GROUPS if params and params.get("filter") == "kind=group" else COMPONENTS
+            kind = (params or {}).get("filter")
+            body = {"kind=group": GROUPS, "kind=template": TEMPLATES}.get(kind, COMPONENTS)
             return httpx.Response(200, json=body, request=req)
         if "/api/catalog/entities/by-name/component/default/payments-api" in url:
             return httpx.Response(200, json=COMPONENTS["items"][0], request=req)
@@ -71,8 +82,9 @@ def test_get_service_has_detail(fake_backstage):
     detail = platform.get_service("payments-api")
     assert detail["tier"] == "critical"
     assert detail["tags"] == ["python"]
-    assert detail["depends_on"] == ["customers-api"]
+    assert detail["depends_on"] == ["customers-api", "resource:payments-db"]
     assert detail["depended_on_by"] == ["orders-web"]  # what breaks if payments-api is down
+    assert "resource:payments-db" in detail["depends_on"]
 
 
 def test_get_service_unknown_or_invalid(fake_backstage):
@@ -97,6 +109,12 @@ def test_status_unhealthy(fake_backstage):
 def test_status_unknown_service_is_refused(fake_backstage):
     with pytest.raises(platform.PlatformError):
         platform.get_service_status("not-in-catalog")
+
+
+def test_list_templates_from_backstage(fake_backstage):
+    templates = platform.list_templates()
+    assert [t["name"] for t in templates] == ["python-service", "node-service"]
+    assert templates[0]["title"] == "Python service"
 
 
 def test_list_teams_with_their_services(fake_backstage):
