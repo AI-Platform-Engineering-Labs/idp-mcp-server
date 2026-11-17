@@ -53,7 +53,14 @@ expect "list_teams shows team-payments" "$(call list_teams '{}')" 'team-payments
 echo "== knowledge base and templates"
 expect "search_docs finds the deploy freeze policy" "$(call search_docs '{"query":"deploy freeze"}')" 'deploy-freeze-policy'
 expect "get_doc reads an article" "$(call get_doc '{"slug":"deploy-freeze-policy"}')" 'Friday 15:00 IST'
-expect "list_templates offers the golden paths" "$(call list_templates '{}')" 'python-service'
+# Templates load from their own catalog location, so they can appear a little after the services.
+OUT=""
+for _ in $(seq 1 20); do
+  OUT=$(call list_templates '{}' || true)
+  echo "$OUT" | grep -q 'python-service' && break
+  echo "  templates not ready yet, retrying..."; sleep 3
+done
+expect "list_templates offers the golden paths" "$OUT" 'python-service'
 
 echo "== create_service (write: must only queue a request)"
 NAME="smoke-$(date +%s)"
