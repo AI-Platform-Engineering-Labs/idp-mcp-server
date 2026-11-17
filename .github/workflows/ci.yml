@@ -69,6 +69,19 @@ jobs:
           done
       - name: Smoke test (HTTP, through Backstage)
         run: ADMIN_TOKEN=local-admin-token bash scripts/smoke-test.sh http://localhost:8000
+      - name: Portal content (templates, catalog and the handbook rendered by TechDocs)
+        run: |
+          set -e
+          B=http://localhost:7007
+          TOKEN=$(curl -fsS "$B/api/auth/guest/refresh" | python3 -c 'import sys,json; print(json.load(sys.stdin)["backstageIdentity"]["token"])')
+          auth=(-H "Authorization: Bearer $TOKEN")
+          n=$(curl -fsS "${auth[@]}" "$B/api/catalog/entities/by-query?filter=kind=template&limit=50" | python3 -c 'import sys,json; print(len(json.load(sys.stdin)["items"]))')
+          echo "templates in the portal: $n"; [ "$n" -ge 3 ]
+          # opening the Docs tab triggers the build; the sync call streams until it is done
+          curl -sS -N -m 240 "${auth[@]}" "$B/api/techdocs/sync/default/component/engineering-handbook" || true
+          curl -fsS "${auth[@]}" "$B/api/techdocs/static/docs/default/component/engineering-handbook/index.html" | grep -q "Skyline Engineering Handbook"
+          curl -fsS "${auth[@]}" "$B/api/techdocs/static/docs/default/component/engineering-handbook/deploy-freeze-policy/index.html" | grep -q "Friday 15:00"
+          echo "handbook rendered by TechDocs"
       - name: Services are not reachable directly
         run: |
           if curl -fsS -m 3 http://localhost:5678/; then echo "payments-api should not be published" >&2; exit 1; fi

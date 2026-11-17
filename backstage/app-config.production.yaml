@@ -24,6 +24,13 @@ auth:
     guest:
       dangerouslyAllowOutsideDevelopment: true
 
+techdocs:
+  builder: 'local'
+  generator:
+    runIn: 'local' # mkdocs is installed in this image
+  publisher:
+    type: 'local'
+
 catalog:
   locations:
     # Paths are relative to the working directory in the image (/app).

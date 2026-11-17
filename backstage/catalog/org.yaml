@@ -30,3 +30,13 @@ metadata:
 spec:
   type: team
   children: []
+---
+apiVersion: backstage.io/v1alpha1
+kind: Group
+metadata:
+  name: team-security
+  description: Security champions - reviews, secrets and the security baseline
+spec:
+  type: team
+  parent: team-platform
+  children: []

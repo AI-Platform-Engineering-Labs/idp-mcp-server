@@ -51,6 +51,7 @@ spec:
   lifecycle: production
   owner: team-payments
   system: shop
+  providesApis: [customers-openapi]
 ---
 apiVersion: backstage.io/v1alpha1
 kind: Component
@@ -73,6 +74,7 @@ spec:
   dependsOn:
     - component:payments-api
     - component:customers-api
+    - resource:orders-db
 ---
 apiVersion: backstage.io/v1alpha1
 kind: Component
@@ -93,6 +95,7 @@ spec:
   system: shop
   dependsOn:
     - component:orders-web
+    - resource:events-bus
 ---
 apiVersion: backstage.io/v1alpha1
 kind: Component
@@ -143,3 +146,64 @@ spec:
           summary: Health check
           responses:
             "200": {description: OK}
+---
+# The company handbook. The "Docs" tab renders backstage/catalog/docs (mkdocs) as a site.
+# The MCP server serves the same Markdown files through search_docs / get_doc.
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: engineering-handbook
+  title: Skyline Engineering Handbook
+  description: Onboarding, golden paths, standards and runbooks. Internal knowledge, not on the internet.
+  annotations:
+    backstage.io/techdocs-ref: dir:./docs
+  tags: [docs, onboarding, runbooks]
+spec:
+  type: documentation
+  lifecycle: production
+  owner: team-platform
+  system: shop
+---
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: orders-db
+  description: PostgreSQL database behind the orders flow
+spec:
+  type: database
+  owner: team-storefront
+  system: shop
+---
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: events-bus
+  description: Message bus carrying order and payment events to the notifications worker
+spec:
+  type: message-queue
+  owner: team-platform
+  system: shop
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: customers-openapi
+  description: Customer profile lookups (REST)
+spec:
+  type: openapi
+  lifecycle: production
+  owner: team-payments
+  system: shop
+  definition: |
+    openapi: 3.0.0
+    info:
+      title: Customers API
+      version: 1.0.0
+    paths:
+      /customers/{id}:
+        get:
+          summary: Get a customer profile
+          parameters:
+            - { name: id, in: path, required: true, schema: { type: string } }
+          responses:
+            '200': { description: The customer profile }

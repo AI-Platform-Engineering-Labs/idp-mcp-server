@@ -1,0 +1,32 @@
+site_name: Skyline Engineering Handbook
+site_description: Internal engineering knowledge for Skyline Commerce
+plugins:
+  - techdocs-core
+nav:
+  - Home: index.md
+  - Onboarding:
+      - "Access and accounts": access-and-accounts.md
+      - "Developer environment setup": dev-environment-setup.md
+      - "First-week checklist for new engineers": first-week-checklist.md
+      - "Welcome to Skyline engineering": welcome-to-skyline-engineering.md
+  - Golden paths:
+      - "Choosing a golden path": choosing-a-golden-path.md
+      - "Golden path: Node service": golden-path-node-service.md
+      - "Golden path: Python service": golden-path-python-service.md
+      - "Golden path: Worker service": golden-path-worker-service.md
+  - How-to guides:
+      - "How to deploy and roll back": how-to-deploy-and-rollback.md
+      - "How to request a new service": how-to-request-a-new-service.md
+      - "How to rotate secrets": how-to-rotate-secrets.md
+  - Standards and policies:
+      - "API design standards": api-design-standards.md
+      - "Data classification and handling": data-classification-handling.md
+      - "Deploy freeze policy": deploy-freeze-policy.md
+      - "Naming conventions": naming-conventions.md
+      - "Security baseline": security-baseline.md
+      - "Service tiers and SLOs": service-tiers-and-slos.md
+  - Runbooks:
+      - "Incident response process": incident-response-process.md
+      - "On-call handbook": on-call-handbook.md
+      - "Runbook: orders-web slow or erroring": runbook-orders-web-latency.md
+      - "Runbook: payments-api outage": runbook-payments-api-outage.md

@@ -88,3 +88,46 @@ spec:
       - title: Dry run only
         content: |
           A real template would now create **${{ parameters.name }}**. In this demo nothing is created.
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: worker-service
+  title: Worker service (golden path)
+  description: Background worker for queues and scheduled jobs, with retries, dead-letter handling and alerts
+  tags: [worker, queue, recommended]
+spec:
+  owner: team-platform
+  type: service
+  parameters:
+    - title: Service details
+      required: [name, owner]
+      properties:
+        name:
+          title: Name
+          type: string
+          description: Lowercase, hyphenated, ending in -worker (see the naming conventions)
+          pattern: '^[a-z0-9][a-z0-9-]{0,62}$'
+        owner:
+          title: Owner team
+          type: string
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind: Group
+        description:
+          title: Description
+          type: string
+  steps:
+    - id: plan
+      name: Plan (dry run)
+      action: debug:log
+      input:
+        message: |
+          Would create ${{ parameters.name }} for ${{ parameters.owner }}:
+          repo from the worker-service skeleton, CI, queue bindings, dead-letter alerts and a catalog entry.
+  output:
+    text:
+      - title: Dry run only
+        content: |
+          A real template would now create **${{ parameters.name }}**. In this demo nothing is created.

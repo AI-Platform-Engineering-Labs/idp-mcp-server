@@ -1,9 +1,9 @@
 """The platform's knowledge base: how-tos, golden paths, standards and runbooks.
 
-The articles are Markdown files in server/knowledge (title, category and tags in the front
-matter). In a real IDP this is TechDocs or a wiki; here it is plain files so the demo has
-company-internal knowledge that is not on the internet. Search is simple keyword scoring: no
-embeddings, no extra service, easy to explain.
+The articles are Markdown files in backstage/catalog/docs/docs (title, category and tags in
+the front matter). The portal renders the same files as TechDocs (the Docs tab), so the
+portal and the MCP server always show the same company-internal knowledge that is not on the
+internet. Search is simple keyword scoring: no embeddings, no extra service, easy to explain.
 """
 
 import os
@@ -14,7 +14,14 @@ from pathlib import Path
 import yaml
 from mcp.server.mcpserver.exceptions import ToolError
 
-DEFAULT_DOCS = Path(__file__).resolve().parent.parent / "knowledge"
+_HERE = Path(__file__).resolve().parent.parent
+# In the container the articles are copied to /app/knowledge; in the repo they are the
+# portal's TechDocs source, so the portal and the MCP server show the same articles.
+DEFAULT_DOCS = (
+    _HERE / "knowledge"
+    if (_HERE / "knowledge").is_dir()
+    else _HERE.parent / "backstage" / "catalog" / "docs" / "docs"
+)
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,80}$")
 WORD_RE = re.compile(r"[a-z0-9]+")
 MAX_CHARS = 20000
@@ -49,6 +56,8 @@ def docs_path() -> Path:
 def _load(path: str) -> dict[str, dict]:
     articles = {}
     for f in sorted(Path(path).glob("*.md")):
+        if f.stem == "index":  # the TechDocs landing page, not an article
+            continue
         text = f.read_text(encoding="utf-8")
         meta, body = {}, text
         if text.startswith("---\n"):
