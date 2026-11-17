@@ -44,3 +44,10 @@ variable "mcp_backstage_token" {
   default     = "local-dev-token-change-me"
   sensitive   = true
 }
+
+variable "admin_token" {
+  description = "Token a human uses to approve or deny the agent's write requests (scripts/approve.sh). Local demo default."
+  type        = string
+  default     = "local-admin-token"
+  sensitive   = true
+}

@@ -2,47 +2,56 @@
 
 import httpx
 import pytest
-from mcp.server.mcpserver.exceptions import ToolError
 
 from idp_mcp import platform
-from idp_mcp.server import mcp
 
-ENTITIES = {
+COMPONENTS = {
     "items": [
         {
             "kind": "Component",
             "metadata": {
                 "name": "payments-api",
                 "description": "Payments",
-                "annotations": {"idp.demo/ai-access": "guarded"},
+                "tags": ["python"],
+                "annotations": {"idp.demo/tier": "critical"},
             },
             "spec": {"owner": "group:team-payments", "system": "shop", "lifecycle": "production"},
+            "relations": [
+                {"type": "dependsOn", "targetRef": "component:default/customers-api"},
+                {"type": "dependencyOf", "targetRef": "component:default/orders-web"},
+                {"type": "ownedBy", "targetRef": "group:default/team-payments"},
+            ],
         },
         {
             "kind": "Component",
-            "metadata": {"name": "orders-web", "annotations": {"idp.demo/ai-access": "open"}},
+            "metadata": {"name": "orders-web"},
             "spec": {"owner": "team-storefront", "system": "shop"},
         },
-        {  # no ai-access annotation: must be treated as guarded
-            "kind": "Component",
-            "metadata": {"name": "unlabelled-svc"},
-            "spec": {"owner": "team-platform", "system": "shop"},
-        },
     ]
+}
+GROUPS = {
+    "items": [{"metadata": {"name": "team-payments"}}, {"metadata": {"name": "team-storefront"}}]
 }
 
 
 @pytest.fixture
 def fake_backstage(monkeypatch):
-    calls = []
+    class Calls(list):
+        state = {"proxy_status": 200}
+
+    calls = Calls()
+    state = calls.state
 
     def fake_get(url, params=None, headers=None, timeout=None):
         calls.append({"url": url, "params": params, "headers": headers})
         req = httpx.Request("GET", url)
         if url.endswith("/api/catalog/entities/by-query"):
-            return httpx.Response(200, json=ENTITIES, request=req)
-        if "/api/proxy/svc/orders-web" in url:
-            return httpx.Response(200, text="orders-web ok", request=req)
+            body = GROUPS if params and params.get("filter") == "kind=group" else COMPONENTS
+            return httpx.Response(200, json=body, request=req)
+        if "/api/catalog/entities/by-name/component/default/payments-api" in url:
+            return httpx.Response(200, json=COMPONENTS["items"][0], request=req)
+        if "/api/proxy/svc/orders-web/" in url:
+            return httpx.Response(state["proxy_status"], text="SECRET BODY", request=req)
         return httpx.Response(404, request=req)
 
     monkeypatch.setenv("BACKSTAGE_URL", "http://backstage:7007/")
@@ -53,56 +62,77 @@ def fake_backstage(monkeypatch):
 
 def test_list_services_from_backstage(fake_backstage):
     services = platform.list_services()
-    assert [s["name"] for s in services] == ["payments-api", "orders-web", "unlabelled-svc"]
+    assert [s["name"] for s in services] == ["payments-api", "orders-web"]
     assert services[0]["owner"] == "team-payments"  # "group:" prefix removed
-    assert [s["ai_access"] for s in services] == ["guarded", "open", "guarded"]
     assert fake_backstage[0]["headers"] == {"Authorization": "Bearer t0ken"}
 
 
-def test_call_service_goes_through_backstage_proxy(fake_backstage):
-    result = platform.call_service("orders-web", "/")
-    assert result == {
-        "service": "orders-web",
-        "path": "/",
-        "status": 200,
-        "body": "orders-web ok",
-    }
+def test_get_service_has_detail(fake_backstage):
+    detail = platform.get_service("payments-api")
+    assert detail["tier"] == "critical"
+    assert detail["tags"] == ["python"]
+    assert detail["depends_on"] == ["customers-api"]
+    assert detail["depended_on_by"] == ["orders-web"]  # what breaks if payments-api is down
+
+
+def test_get_service_unknown_or_invalid(fake_backstage):
+    with pytest.raises(platform.PlatformError):
+        platform.get_service("nope")
+    with pytest.raises(platform.PlatformError):
+        platform.get_service("../admin")
+
+
+def test_status_reports_only_health_not_the_body(fake_backstage):
+    result = platform.get_service_status("orders-web")
+    assert result == {"service": "orders-web", "healthy": True, "http_status": 200}
+    assert "SECRET" not in str(result)
     assert fake_backstage[-1]["url"] == "http://backstage:7007/api/proxy/svc/orders-web/"
 
 
-@pytest.mark.parametrize("name", ["payments-api", "unlabelled-svc"])
-def test_guarded_services_are_refused_and_never_called(fake_backstage, name):
-    with pytest.raises(platform.PlatformError, match="guarded"):
-        platform.call_service(name, "/")
-    assert not any("/api/proxy/" in c["url"] for c in fake_backstage)
+def test_status_unhealthy(fake_backstage):
+    fake_backstage.state["proxy_status"] = 503
+    assert platform.get_service_status("orders-web")["healthy"] is False
+
+
+def test_status_unknown_service_is_refused(fake_backstage):
+    with pytest.raises(platform.PlatformError):
+        platform.get_service_status("not-in-catalog")
+
+
+def test_list_teams_with_their_services(fake_backstage):
+    teams = platform.list_teams()
+    assert teams == [
+        {"team": "team-payments", "services": ["payments-api"]},
+        {"team": "team-storefront", "services": ["orders-web"]},
+    ]
 
 
 @pytest.mark.parametrize(
-    ("name", "path"),
+    ("template", "name", "owner", "message"),
     [
-        ("not-in-catalog", "/"),
-        ("../admin", "/"),
-        ("orders-web", "/../../catalog"),
-        ("orders-web", "http://evil"),
+        ("rust-service", "new-svc", "team-payments", "Unknown template"),
+        ("python-service", "Bad Name!", "team-payments", "Service name"),
+        ("python-service", "orders-web", "team-payments", "already exists"),
+        ("python-service", "new-svc", "team-nobody", "Unknown team"),
     ],
 )
-def test_call_service_rejects_unknown_names_and_bad_paths(fake_backstage, name, path):
-    with pytest.raises(platform.PlatformError):
-        platform.call_service(name, path)
+def test_validate_new_service_rejects_bad_requests(fake_backstage, template, name, owner, message):
+    with pytest.raises(platform.PlatformError, match=message):
+        platform.validate_new_service(template, name, owner)
 
 
-@pytest.mark.asyncio
-async def test_call_service_tool_reports_errors_to_the_agent(fake_backstage):
-    # Over MCP this becomes an is_error result whose text the agent reads.
-    with pytest.raises(ToolError, match="Unknown service 'nope'"):
-        await mcp.call_tool("call_service", {"name": "nope"})
+def test_validate_new_service_accepts_a_good_request(fake_backstage):
+    platform.validate_new_service("python-service", "new-svc", "team-payments")
 
 
-def test_backstage_down_is_a_clear_error(monkeypatch):
-    def boom(*a, **k):
-        raise httpx.ConnectError("connection refused")
-
-    monkeypatch.setenv("BACKSTAGE_URL", "http://backstage:7007")
-    monkeypatch.setattr(platform.httpx, "get", boom)
-    with pytest.raises(platform.PlatformError, match="not reachable"):
-        platform.list_services()
+def test_file_catalog_fallback_without_backstage():
+    assert {s["name"] for s in platform.list_services()} >= {"payments-api", "orders-web"}
+    assert {
+        "team": "team-payments",
+        "services": ["customers-api", "payments-api"],
+    } in platform.list_teams()
+    with pytest.raises(platform.PlatformError, match="BACKSTAGE_URL"):
+        platform.get_service_status("orders-web")
+    detail = platform.get_service("customers-api")
+    assert detail["depended_on_by"] == ["orders-web", "payments-api"]
+    assert detail["oncall"].endswith("@example.com")

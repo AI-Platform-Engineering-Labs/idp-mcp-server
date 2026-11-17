@@ -42,10 +42,15 @@ That's the "MCP is the new API" idea of the talk.
 |---|---|---|---|
 | `hello` | read | Connection check | ✅ |
 | `list_services` | read | Lists services from the **Backstage catalog** (optionally by owner) | ✅ |
-| `call_service` | read | `GET` a service **through the Backstage proxy** and return status + body | ✅ |
-| `get_deploy_status`, `get_logs` | read | Deploy runs and logs (GitHub Actions) | roadmap |
-| `create_service` | **write** | New service from a Backstage template | roadmap |
-| `trigger_deploy` | **write** | Start a deploy | roadmap |
+| `get_service` | read | One service's owner, tier, lifecycle, tags and links | ✅ |
+| `get_service_status` | read | Is it healthy? The platform checks it through the Backstage proxy and returns only healthy/unhealthy, never the service's data | ✅ |
+| `list_teams` | read | Teams and the services each owns | ✅ |
+| `create_service` | **write, needs a human** | Ask for a new service from a golden-path template. Only **queues a request**: nothing is created until a human approves | ✅ (the action itself is a placeholder) |
+| `get_request_status` | read | Pending, approved or denied | ✅ |
+| `get_deploy_status`, `get_logs`, `trigger_deploy` | read / write | Deploy runs, logs, start a deploy (GitHub Actions) | roadmap |
+
+The tools are **platform actions** (find a service, check it, ask for a new one), not a back door
+to the business services themselves: the agent cannot send requests to `payments-api`.
 
 The interesting part of the talk is the **guardrails**: read/write separation, least-privilege
 tokens, services reachable only via the IDP, human approval for write tools, an audit log, and a
@@ -75,14 +80,21 @@ prompt-injection demo.
 
 **How a request flows**, e.g. you ask Copilot *"Is the payments API healthy?"*:
 
-1. Copilot sees the MCP tools and calls `list_services`, then `call_service(name="payments-api")`.
+1. Copilot sees the MCP tools and calls `get_service_status(name="payments-api")`.
 2. The MCP server checks the name against the catalog, then calls
    `GET http://backstage:7007/api/proxy/svc/payments-api/` with its token.
 3. Backstage accepts the token only for the `catalog` and `proxy` plugins, and forwards the call
    to `payments-api` inside the cluster.
 4. `payments-api` accepts it because it comes from a Backstage pod (NetworkPolicy). A direct call
    from anywhere else, including the MCP server's pod, is dropped.
-5. The answer goes back up the chain and Copilot tells you the service is healthy.
+5. The MCP server returns only `healthy: true` and the HTTP status. The service's own response
+   never reaches the agent.
+
+**And a write**, e.g. *"Create a python service called pay-gateway for team-payments"*:
+`create_service` validates the request (known template and team, unused name) and **queues it**.
+The agent is told "not created yet, a human must approve". You approve with
+`bash scripts/approve.sh approve <request-id>`; the agent cannot, because approval is an admin
+endpoint outside MCP that needs a token the agent never sees.
 
 **Why this shape?** The agent never gets a key to the cluster or to the services. Everything goes
 through the IDP, which already knows who owns what and enforces access. That's the core
@@ -193,7 +205,7 @@ because it builds natively).
 Backstage needs about a minute to start. Then:
 
 ```bash
-bash ../../scripts/smoke-test.sh     # health, list_services, call_service through Backstage
+ADMIN_TOKEN=local-admin-token bash ../../scripts/smoke-test.sh   # read tools, queued write, human approval
 ```
 
 Open **http://localhost:7007** (click *Enter* as guest) to see the catalog. When done:
@@ -301,27 +313,32 @@ palette → **MCP: List Servers** → pick one → **Start**:
 
 Then in Copilot Chat (Agent mode) try:
 
-- *"Which services does team-payments own?"* → `list_services`
-- *"Check if every service in the shop system is healthy."* → `list_services` + `call_service` ×3
-- *"Call notifications-worker and tell me who owns it."*
-- *"Call payments-api."* → refused: it is **guarded** (see below)
+- *"Which teams exist and what does each own?"* → `list_teams`
+- *"Who owns payments-api, who is on call, and what breaks if it goes down?"* → `get_service`
+- Incident demo: `docker stop payments-api`, then *"Checkout is failing. What is down, who owns it, and what is affected?"* (`docker start payments-api` to fix; see `docs/demo-local.md`)
+- *"Check whether every service in the shop system is healthy."* → `list_services` + `get_service_status` per service
+- *"Create a python-service called pay-gateway for team-payments."* → queued, **not created**
+- Then in a terminal: `bash scripts/approve.sh list`, then `bash scripts/approve.sh approve <id>`
+- *"What happened to my request?"* → `get_request_status` now says approved
 
-### Which services an agent may call (guardrail)
+### The guardrails in this demo
 
-Four sample services run behind Backstage. Each has an `idp.demo/ai-access` annotation in
-`backstage/catalog/services.yaml`:
+| Guardrail | Where |
+|---|---|
+| Read and write are separate tools; write tools are marked destructive | `server/idp_mcp/server.py` |
+| A write tool only **queues** a request; a human approves outside MCP | `server/idp_mcp/approvals.py`, `scripts/approve.sh`, admin endpoint needs `ADMIN_TOKEN` |
+| Agent gets only healthy/unhealthy for a service, never its data or a caller-chosen URL | `platform.get_service_status` |
+| Agent can only ask for golden-path templates, known teams, unused names | `platform.validate_new_service` |
+| MCP token limited to the catalog and proxy plugins | `backstage/app-config.yaml` |
+| Services unreachable except through Backstage | `k8s/network-policy.yaml` |
 
-| Service | `ai-access` | What the agent sees |
-|---|---|---|
-| `orders-web`, `notifications-worker` | `open` | `call_service` works |
-| `payments-api`, `customers-api` | `guarded` | listed in the catalog, but `call_service` is refused with a clear message |
-
-The check is in the MCP server (`server/idp_mcp/platform.py`), before any request is made.
-A service with no annotation is guarded (default deny). To open or close a service, change the
-annotation and restart Backstage. `scripts/smoke-test.sh` proves both sides.
+The approval store is in memory and the "create" action is a placeholder: the flow is real, but
+no repository is created. `scripts/smoke-test.sh` proves it end to end.
 
 **Claude Desktop / Claude Code**: add an HTTP MCP server with the same URL
 (Claude Code: `claude mcp add --transport http idp http://localhost:8000/mcp`).
+
+**On stage:** `docs/demo-local.md` is a one-page cheat sheet.
 
 **No AI at all**: `bash scripts/smoke-test.sh <base-url>` makes the same MCP calls with curl.
 
@@ -346,10 +363,10 @@ annotation and restart Backstage. `scripts/smoke-test.sh` proves both sides.
 | # | Step | Talk point |
 |---|---|---|
 | 0 | ✅ Scaffold: MCP server, Docker, Terraform, CI | "An MCP server is just a small service" |
-| 1 | ✅ **Backstage on AKS**, services reachable only via the IDP, `list_services` + `call_service` through Backstage | The IDP is the agent's only door |
-| 2 | Read tools: `get_service` (owner, docs, dependencies), deploy status and logs | Rich context for the agent |
-| 3 | Write tools in a separate toolset: `create_service` (Backstage template), `trigger_deploy` | Read/write separation |
-| 4 | **Human approval** for write tools (MCP elicitation) and dry-run | Human in the loop |
+| 1 | ✅ **Backstage on AKS**, services reachable only via the IDP, platform read tools (`list_services`, `get_service`, `get_service_status`, `list_teams`) | The IDP is the agent's only door |
+| 2 | ✅ Read tools: catalog detail and status (deploy status and logs still to do) | Rich context for the agent |
+| 3 | ✅ Write tool in a separate lane: `create_service` queues a request (`trigger_deploy` still to do) | Read/write separation |
+| 4 | ✅ **Human approval** through an admin endpoint outside MCP (the real scaffolder call is still a placeholder) | Human in the loop |
 | 5 | **Auth** on the MCP endpoint, per-toolset tokens | Least privilege |
 | 6 | **Audit log**: every tool call as structured JSON | Accountability |
 | 7 | **Prompt-injection demo**: a malicious service description tries to make the agent call a write tool | Why the guardrails exist |
@@ -362,7 +379,7 @@ annotation and restart Backstage. `scripts/smoke-test.sh` proves both sides.
 | Problem | Fix |
 |---|---|
 | Browser shows `Not Found` at `localhost:8000` | Normal: the MCP server only serves `/mcp` and `/healthz`. Backstage is on port 7007. |
-| `smoke-test.sh` fails at `call_service` right after start | Backstage is still starting (~1 min). Check `http://localhost:7007/.backstage/health/v1/readiness`. |
+| `smoke-test.sh` fails at `get_service_status` right after start | Backstage is still starting (~1 min). Check `http://localhost:7007/.backstage/health/v1/readiness`. |
 | `failed to create Docker client: protocol not available` | `docker_host` is set to a value for another OS (usually the Windows `npipe:` line on a Mac or Linux). Delete `infra/local/terraform.tfvars`, or set the line for your OS (see `terraform.tfvars.example`). |
 | `Cannot connect to the Docker daemon` (local `terraform apply`) | Start Docker Desktop. On macOS, if `/var/run/docker.sock` doesn't exist, run `export DOCKER_HOST=$(docker context inspect --format '{{.Endpoints.docker.Host}}')` and re-run, or enable Docker Desktop → Settings → Advanced → "Allow the default Docker socket to be used". On Windows set `docker_host = "npipe:////./pipe/docker_engine"`. |
 | `terraform apply` (local) fails pulling `ghcr.io/...` | Images not published or not public yet: use `image_source = "build"`. |

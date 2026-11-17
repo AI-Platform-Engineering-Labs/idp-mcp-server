@@ -4,24 +4,28 @@ services:
   - name: payments-api
     owner: team-payments
     tier: critical
-    ai_access: guarded
     repo: AI-Platform-Engineering-Labs/payments-api
     runtime: python
+    oncall: payments-oncall@example.com
+    depends_on: ['customers-api']
   - name: customers-api
     owner: team-payments
     tier: critical
-    ai_access: guarded
     repo: AI-Platform-Engineering-Labs/customers-api
     runtime: java
+    oncall: payments-oncall@example.com
+    depends_on: []
   - name: orders-web
     owner: team-storefront
     tier: standard
-    ai_access: open
     repo: AI-Platform-Engineering-Labs/orders-web
     runtime: node
+    oncall: storefront-oncall@example.com
+    depends_on: ['payments-api', 'customers-api']
   - name: notifications-worker
     owner: team-platform
     tier: standard
-    ai_access: open
     repo: AI-Platform-Engineering-Labs/notifications-worker
     runtime: go
+    oncall: platform-oncall@example.com
+    depends_on: ['orders-web']

@@ -48,6 +48,7 @@ services:
       MCP_TRANSPORT: http
       BACKSTAGE_URL: http://backstage:7007
       BACKSTAGE_TOKEN: ${MCP_BACKSTAGE_TOKEN:-local-dev-token-change-me}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-local-admin-token}   # human approval of write actions
     depends_on:
       backstage:
         condition: service_healthy

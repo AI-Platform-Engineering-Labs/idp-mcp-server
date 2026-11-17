@@ -68,7 +68,7 @@ jobs:
             sleep 5
           done
       - name: Smoke test (HTTP, through Backstage)
-        run: bash scripts/smoke-test.sh http://localhost:8000
+        run: ADMIN_TOKEN=local-admin-token bash scripts/smoke-test.sh http://localhost:8000
       - name: Services are not reachable directly
         run: |
           if curl -fsS -m 3 http://localhost:5678/; then echo "payments-api should not be published" >&2; exit 1; fi

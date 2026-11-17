@@ -139,7 +139,12 @@ jobs:
           # Created once per cluster and kept on re-runs.
           if ! kubectl -n idp get secret idp-tokens >/dev/null 2>&1; then
             kubectl -n idp create secret generic idp-tokens \
-              --from-literal=mcp-backstage-token="$(openssl rand -hex 24)"
+              --from-literal=mcp-backstage-token="$(openssl rand -hex 24)" \
+              --from-literal=admin-token="$(openssl rand -hex 24)"
+          elif [ -z "$(kubectl -n idp get secret idp-tokens -o jsonpath='{.data.admin-token}')" ]; then
+            # cluster created before approvals existed: add the admin token
+            kubectl -n idp patch secret idp-tokens --type merge \
+              -p "{\"stringData\":{\"admin-token\":\"$(openssl rand -hex 24)\"}}"
           fi
       - name: Apply manifests (k8s/)
         run: |
@@ -174,7 +179,10 @@ jobs:
             kubectl -n idp rollout status "deployment/$d" --timeout=10m
           done
       - name: Smoke test through the MCP server
-        run: bash scripts/smoke-test.sh "http://${{ steps.ips.outputs.mcp-server }}"
+        run: |
+          ADMIN_TOKEN="$(kubectl -n idp get secret idp-tokens -o jsonpath='{.data.admin-token}' | base64 -d)"
+          export ADMIN_TOKEN
+          bash scripts/smoke-test.sh "http://${{ steps.ips.outputs.mcp-server }}"
       - name: Show that services are reachable only via the IDP
         run: |
           # A pod that is not Backstage tries to call payments-api directly: the network policy drops it.

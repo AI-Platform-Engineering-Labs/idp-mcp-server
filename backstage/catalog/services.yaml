@@ -1,11 +1,7 @@
 # The software catalog: the services running on the platform.
-# Annotation idp.demo/ai-access decides what an AI agent may do (enforced by the MCP server):
-#   open    - the agent may call the service
-#   guarded - the agent sees it in the catalog but call_service refuses it
-# A component without the annotation is treated as guarded (default deny).
 # Each one runs in the cluster with NO public address. The only way to reach it is
 # the Backstage proxy at /api/proxy/svc/<name>/ (see proxy.endpoints in app-config.yaml),
-# which is exactly what the MCP server's call_service tool uses.
+# which is how the MCP server's get_service_status tool checks a service.
 apiVersion: backstage.io/v1alpha1
 kind: System
 metadata:
@@ -21,13 +17,20 @@ metadata:
   description: Takes card payments for orders
   annotations:
     idp.demo/tier: critical
-    idp.demo/ai-access: guarded
+    idp.demo/oncall: payments-oncall@example.com
   tags: [python]
+  links:
+    - url: https://runbooks.example.com/payments-api
+      title: Runbook
+    - url: https://grafana.example.com/d/payments-api
+      title: Dashboard
 spec:
   type: service
   lifecycle: production
   owner: team-payments
   system: shop
+  dependsOn:
+    - component:customers-api
 ---
 apiVersion: backstage.io/v1alpha1
 kind: Component
@@ -36,8 +39,11 @@ metadata:
   description: Customer profiles and contact details (personal data)
   annotations:
     idp.demo/tier: critical
-    idp.demo/ai-access: guarded
+    idp.demo/oncall: payments-oncall@example.com
   tags: [java]
+  links:
+    - url: https://runbooks.example.com/customers-api
+      title: Runbook
 spec:
   type: service
   lifecycle: production
@@ -51,13 +57,19 @@ metadata:
   description: Storefront web app where customers place orders
   annotations:
     idp.demo/tier: standard
-    idp.demo/ai-access: open
+    idp.demo/oncall: storefront-oncall@example.com
   tags: [node]
+  links:
+    - url: https://runbooks.example.com/orders-web
+      title: Runbook
 spec:
   type: website
   lifecycle: production
   owner: team-storefront
   system: shop
+  dependsOn:
+    - component:payments-api
+    - component:customers-api
 ---
 apiVersion: backstage.io/v1alpha1
 kind: Component
@@ -66,13 +78,18 @@ metadata:
   description: Sends order and shipping emails
   annotations:
     idp.demo/tier: standard
-    idp.demo/ai-access: open
+    idp.demo/oncall: platform-oncall@example.com
   tags: [go]
+  links:
+    - url: https://runbooks.example.com/notifications-worker
+      title: Runbook
 spec:
   type: service
   lifecycle: experimental
   owner: team-platform
   system: shop
+  dependsOn:
+    - component:orders-web
 ---
 apiVersion: backstage.io/v1alpha1
 kind: Component

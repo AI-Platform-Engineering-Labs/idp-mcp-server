@@ -155,6 +155,7 @@ resource "docker_container" "mcp" {
     "PORT=8000",
     "BACKSTAGE_URL=http://backstage:7007",
     "BACKSTAGE_TOKEN=${var.mcp_backstage_token}",
+    "ADMIN_TOKEN=${var.admin_token}",
   ]
 
   networks_advanced {
