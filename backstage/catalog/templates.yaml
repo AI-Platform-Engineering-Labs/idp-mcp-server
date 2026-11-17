@@ -1,0 +1,90 @@
+# Software templates (golden paths). They show up under "Create" in the portal and, through
+# the MCP server, as list_templates. The only step here is a dry run that logs what a real
+# template would do (create the repo, CI, dashboards, catalog entry), so the demo needs no
+# GitHub token. Swap the step for fetch:template + publish:github in a real platform.
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: python-service
+  title: Python service (golden path)
+  description: FastAPI service with CI, security scanning, dashboards and on-call wired up
+  tags: [python, api, recommended]
+spec:
+  owner: team-platform
+  type: service
+  parameters:
+    - title: Service details
+      required: [name, owner]
+      properties:
+        name:
+          title: Name
+          type: string
+          description: Lowercase, hyphenated, ending in -api (see the naming conventions)
+          pattern: '^[a-z0-9][a-z0-9-]{0,62}$'
+        owner:
+          title: Owner team
+          type: string
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind: Group
+        description:
+          title: Description
+          type: string
+  steps:
+    - id: plan
+      name: Plan (dry run)
+      action: debug:log
+      input:
+        message: |
+          Would create ${{ parameters.name }} for ${{ parameters.owner }}:
+          repo from the python-service skeleton, CI (ruff, pytest, audit), Helm chart,
+          dashboards, on-call and a catalog entry.
+  output:
+    text:
+      - title: Dry run only
+        content: |
+          A real template would now create **${{ parameters.name }}**. In this demo nothing is created.
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: node-service
+  title: Node service (golden path)
+  description: Node.js web service or BFF with CI, CDN publishing and the standard security headers
+  tags: [node, web, recommended]
+spec:
+  owner: team-platform
+  type: website
+  parameters:
+    - title: Service details
+      required: [name, owner]
+      properties:
+        name:
+          title: Name
+          type: string
+          description: Lowercase, hyphenated, ending in -web (see the naming conventions)
+          pattern: '^[a-z0-9][a-z0-9-]{0,62}$'
+        owner:
+          title: Owner team
+          type: string
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind: Group
+        description:
+          title: Description
+          type: string
+  steps:
+    - id: plan
+      name: Plan (dry run)
+      action: debug:log
+      input:
+        message: |
+          Would create ${{ parameters.name }} for ${{ parameters.owner }}:
+          repo from the node-service skeleton, CI, CDN publishing, dashboards and a catalog entry.
+  output:
+    text:
+      - title: Dry run only
+        content: |
+          A real template would now create **${{ parameters.name }}**. In this demo nothing is created.

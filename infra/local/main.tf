@@ -40,6 +40,7 @@ locals {
   mcp_hash = sha1(join("", [for f in sort(concat(
     tolist(fileset(local.repo_root, "server/idp_mcp/**/*.py")),
     tolist(fileset(local.repo_root, "server/catalog/*")),
+    tolist(fileset(local.repo_root, "server/knowledge/*")),
     ["server/requirements.txt", "Dockerfile"],
   )) : filesha1("${local.repo_root}/${f}")]))
   backstage_hash = sha1(join("", [for f in sort(concat(
