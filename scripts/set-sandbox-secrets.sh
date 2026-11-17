@@ -12,7 +12,9 @@
 set -euo pipefail
 REPO="${1:-AI-Platform-Engineering-Labs/idp-mcp-server}"
 for v in ARM_CLIENT_ID ARM_CLIENT_SECRET ARM_TENANT_ID; do
-  printf '%s' "${!v:?$v is not set}" | gh secret set "$v" -R "$REPO"
+  val="${!v:-}"   # plain indirect expansion: works in macOS's bash 3.2 (${!v:?msg} does not)
+  [ -n "$val" ] || { echo "ERROR: $v is not set. Run: export $v=..." >&2; exit 1; }
+  printf '%s' "$val" | gh secret set "$v" -R "$REPO"
 done
 if [ "${CLEAR_OVERRIDES:-}" = 1 ]; then
   gh secret delete ARM_SUBSCRIPTION_ID -R "$REPO" 2>/dev/null || true
