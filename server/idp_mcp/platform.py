@@ -48,6 +48,8 @@ def _from_entity(e: dict) -> dict:
         "lifecycle": spec.get("lifecycle", ""),
         "type": spec.get("type", ""),
         "tier": meta.get("annotations", {}).get("idp.demo/tier", ""),
+        # Default deny: anything not explicitly labelled "open" is guarded.
+        "ai_access": meta.get("annotations", {}).get("idp.demo/ai-access", "guarded"),
     }
 
 
@@ -72,9 +74,15 @@ def call_service(name: str, path: str = "/") -> dict:
     """GET a service through the Backstage proxy (/api/proxy/svc/<name>)."""
     if not NAME_RE.match(name):
         raise PlatformError("Invalid service name.")
-    known = {s["name"] for s in list_services()}
-    if name not in known:
-        raise PlatformError(f"Unknown service '{name}'. Known services: {sorted(known)}")
+    services = {s["name"]: s for s in list_services()}
+    if name not in services:
+        raise PlatformError(f"Unknown service '{name}'. Known services: {sorted(services)}")
+    if services[name].get("ai_access", "guarded") != "open":
+        open_names = sorted(n for n, s in services.items() if s.get("ai_access") == "open")
+        raise PlatformError(
+            f"'{name}' is guarded: AI agents may not call it. A human must do this "
+            f"through Backstage. Services open to agents: {open_names}"
+        )
     if not path.startswith("/") or ".." in path or "//" in path:
         raise PlatformError("Path must start with '/' and must not contain '..' or '//'.")
 

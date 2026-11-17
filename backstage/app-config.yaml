@@ -164,6 +164,8 @@ proxy:
       target: http://orders-web:5678
     /svc/notifications-worker:
       target: http://notifications-worker:5678
+    /svc/customers-api:
+      target: http://customers-api:5678
 
 techdocs:
   builder: 'local' # Alternatives - 'external'

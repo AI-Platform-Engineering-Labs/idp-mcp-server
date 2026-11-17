@@ -11,13 +11,22 @@ ENTITIES = {
     "items": [
         {
             "kind": "Component",
-            "metadata": {"name": "payments-api", "description": "Payments"},
+            "metadata": {
+                "name": "payments-api",
+                "description": "Payments",
+                "annotations": {"idp.demo/ai-access": "guarded"},
+            },
             "spec": {"owner": "group:team-payments", "system": "shop", "lifecycle": "production"},
         },
         {
             "kind": "Component",
-            "metadata": {"name": "orders-web"},
+            "metadata": {"name": "orders-web", "annotations": {"idp.demo/ai-access": "open"}},
             "spec": {"owner": "team-storefront", "system": "shop"},
+        },
+        {  # no ai-access annotation: must be treated as guarded
+            "kind": "Component",
+            "metadata": {"name": "unlabelled-svc"},
+            "spec": {"owner": "team-platform", "system": "shop"},
         },
     ]
 }
@@ -32,8 +41,8 @@ def fake_backstage(monkeypatch):
         req = httpx.Request("GET", url)
         if url.endswith("/api/catalog/entities/by-query"):
             return httpx.Response(200, json=ENTITIES, request=req)
-        if "/api/proxy/svc/payments-api" in url:
-            return httpx.Response(200, text="payments-api ok", request=req)
+        if "/api/proxy/svc/orders-web" in url:
+            return httpx.Response(200, text="orders-web ok", request=req)
         return httpx.Response(404, request=req)
 
     monkeypatch.setenv("BACKSTAGE_URL", "http://backstage:7007/")
@@ -44,20 +53,28 @@ def fake_backstage(monkeypatch):
 
 def test_list_services_from_backstage(fake_backstage):
     services = platform.list_services()
-    assert [s["name"] for s in services] == ["payments-api", "orders-web"]
+    assert [s["name"] for s in services] == ["payments-api", "orders-web", "unlabelled-svc"]
     assert services[0]["owner"] == "team-payments"  # "group:" prefix removed
+    assert [s["ai_access"] for s in services] == ["guarded", "open", "guarded"]
     assert fake_backstage[0]["headers"] == {"Authorization": "Bearer t0ken"}
 
 
 def test_call_service_goes_through_backstage_proxy(fake_backstage):
-    result = platform.call_service("payments-api", "/")
+    result = platform.call_service("orders-web", "/")
     assert result == {
-        "service": "payments-api",
+        "service": "orders-web",
         "path": "/",
         "status": 200,
-        "body": "payments-api ok",
+        "body": "orders-web ok",
     }
-    assert fake_backstage[-1]["url"] == "http://backstage:7007/api/proxy/svc/payments-api/"
+    assert fake_backstage[-1]["url"] == "http://backstage:7007/api/proxy/svc/orders-web/"
+
+
+@pytest.mark.parametrize("name", ["payments-api", "unlabelled-svc"])
+def test_guarded_services_are_refused_and_never_called(fake_backstage, name):
+    with pytest.raises(platform.PlatformError, match="guarded"):
+        platform.call_service(name, "/")
+    assert not any("/api/proxy/" in c["url"] for c in fake_backstage)
 
 
 @pytest.mark.parametrize(
@@ -65,8 +82,8 @@ def test_call_service_goes_through_backstage_proxy(fake_backstage):
     [
         ("not-in-catalog", "/"),
         ("../admin", "/"),
-        ("payments-api", "/../../catalog"),
-        ("payments-api", "http://evil"),
+        ("orders-web", "/../../catalog"),
+        ("orders-web", "http://evil"),
     ],
 )
 def test_call_service_rejects_unknown_names_and_bad_paths(fake_backstage, name, path):

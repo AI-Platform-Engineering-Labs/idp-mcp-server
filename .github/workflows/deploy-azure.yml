@@ -168,7 +168,7 @@ jobs:
           kubectl -n idp rollout restart deployment/backstage
       - name: Wait for rollouts
         run: |
-          for d in payments-api orders-web notifications-worker mcp-server backstage; do
+          for d in payments-api customers-api orders-web notifications-worker mcp-server backstage; do
             kubectl -n idp rollout status "deployment/$d" --timeout=10m
           done
       - name: Smoke test through the MCP server

@@ -40,7 +40,8 @@ def hello(name: str = "platform engineer") -> str:
 @mcp.tool(annotations=READ_ONLY)
 def list_services(owner: str | None = None) -> list[dict]:
     """List services in the platform's software catalog (Backstage), optionally filtered
-    by owning team, e.g. owner="team-payments"."""
+    by owning team, e.g. owner="team-payments". Each service has ai_access: "open" means
+    you may call it, "guarded" means it is off limits to agents."""
     services = platform.list_services()
     if owner:
         services = [s for s in services if s.get("owner") == owner]
@@ -54,7 +55,8 @@ CALL_SERVICE = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWor
 @mcp.tool(annotations=CALL_SERVICE)
 def call_service(name: str, path: str = "/") -> dict:
     """Send a GET request to a platform service through the IDP (Backstage proxy) and
-    return the HTTP status and response body. Use list_services to find valid names."""
+    return the HTTP status and response body. Only services with ai_access "open" can be
+    called; guarded ones are refused. Use list_services to find valid names."""
     return platform.call_service(name, path)
 
 

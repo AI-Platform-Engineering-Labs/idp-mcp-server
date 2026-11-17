@@ -13,6 +13,9 @@ services:
   payments-api:
     <<: *service
     command: ["-listen=:5678", '-text={"service":"payments-api","owner":"team-payments","status":"healthy"}']
+  customers-api:
+    <<: *service
+    command: ["-listen=:5678", '-text={"service":"customers-api","owner":"team-payments","status":"healthy"}']
   orders-web:
     <<: *service
     command: ["-listen=:5678", '-text={"service":"orders-web","owner":"team-storefront","status":"healthy"}']
@@ -33,7 +36,7 @@ services:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7007/.backstage/health/v1/readiness').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       retries: 30
-    depends_on: [payments-api, orders-web, notifications-worker]
+    depends_on: [payments-api, customers-api, orders-web, notifications-worker]
 
   idp-mcp-server:
     build: .

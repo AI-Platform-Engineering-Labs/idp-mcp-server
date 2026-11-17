@@ -51,6 +51,7 @@ locals {
 
   services = {
     payments-api         = "team-payments"
+    customers-api        = "team-payments"
     orders-web           = "team-storefront"
     notifications-worker = "team-platform"
   }

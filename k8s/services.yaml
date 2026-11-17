@@ -40,6 +40,41 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: customers-api
+  labels: {app: customers-api, idp.demo/role: service}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: customers-api}
+  template:
+    metadata:
+      labels: {app: customers-api, idp.demo/role: service, idp.demo/owner: team-payments}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: app
+          image: hashicorp/http-echo:1.0
+          args: ["-listen=:5678", '-text={"service":"customers-api","owner":"team-payments","status":"healthy"}']
+          ports: [{containerPort: 5678}]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 32Mi}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          readinessProbe: {httpGet: {path: /, port: 5678}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: customers-api
+spec:
+  type: ClusterIP
+  selector: {app: customers-api}
+  ports: [{port: 5678, targetPort: 5678}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: orders-web
   labels: {app: orders-web, idp.demo/role: service}
 spec:
