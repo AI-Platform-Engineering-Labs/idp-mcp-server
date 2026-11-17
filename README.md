@@ -2,8 +2,6 @@
 
 **AI agents using your Internal Developer Platform (IDP) through MCP, safely.**
 
-Demo repo for the CNCG talk *"MCP Is the New API: Wiring AI Agents into Your Internal Developer Platform"*.
-
 A **Backstage** portal and three sample services run on **AKS** (or Docker on your laptop). The
 services have no public address: the IDP is the only way in. An **MCP server** gives AI agents
 (GitHub Copilot, Claude) tools to use the IDP: list the services in the catalog, and call a
