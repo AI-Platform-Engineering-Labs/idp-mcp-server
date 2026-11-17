@@ -16,6 +16,11 @@ COMPONENTS = {
                 "annotations": {"idp.demo/tier": "critical"},
             },
             "spec": {"owner": "group:team-payments", "system": "shop", "lifecycle": "production"},
+            "relations": [
+                {"type": "dependsOn", "targetRef": "component:default/customers-api"},
+                {"type": "dependencyOf", "targetRef": "component:default/orders-web"},
+                {"type": "ownedBy", "targetRef": "group:default/team-payments"},
+            ],
         },
         {
             "kind": "Component",
@@ -66,6 +71,8 @@ def test_get_service_has_detail(fake_backstage):
     detail = platform.get_service("payments-api")
     assert detail["tier"] == "critical"
     assert detail["tags"] == ["python"]
+    assert detail["depends_on"] == ["customers-api"]
+    assert detail["depended_on_by"] == ["orders-web"]  # what breaks if payments-api is down
 
 
 def test_get_service_unknown_or_invalid(fake_backstage):
@@ -126,3 +133,6 @@ def test_file_catalog_fallback_without_backstage():
     } in platform.list_teams()
     with pytest.raises(platform.PlatformError, match="BACKSTAGE_URL"):
         platform.get_service_status("orders-web")
+    detail = platform.get_service("customers-api")
+    assert detail["depended_on_by"] == ["orders-web", "payments-api"]
+    assert detail["oncall"].endswith("@example.com")

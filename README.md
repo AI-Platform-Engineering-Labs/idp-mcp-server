@@ -314,7 +314,8 @@ palette → **MCP: List Servers** → pick one → **Start**:
 Then in Copilot Chat (Agent mode) try:
 
 - *"Which teams exist and what does each own?"* → `list_teams`
-- *"Who owns payments-api and what tier is it?"* → `get_service`
+- *"Who owns payments-api, who is on call, and what breaks if it goes down?"* → `get_service`
+- Incident demo: `docker stop payments-api`, then *"Checkout is failing. What is down, who owns it, and what is affected?"* (`docker start payments-api` to fix; see `docs/demo-local.md`)
 - *"Check whether every service in the shop system is healthy."* → `list_services` + `get_service_status` per service
 - *"Create a python-service called pay-gateway for team-payments."* → queued, **not created**
 - Then in a terminal: `bash scripts/approve.sh list`, then `bash scripts/approve.sh approve <id>`

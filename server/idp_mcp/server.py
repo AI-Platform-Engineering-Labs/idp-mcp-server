@@ -58,7 +58,8 @@ def list_services(owner: str | None = None) -> list[dict]:
 
 @mcp.tool(annotations=READ_ONLY)
 def get_service(name: str) -> dict:
-    """Details of one service from the catalog: owner, tier, lifecycle, system, tags and links.
+    """Details of one service from the catalog: owner, on-call contact, tier, lifecycle, tags,
+    runbook links, what it depends on and what depends on it (what breaks if it goes down).
     Use list_services to find valid names."""
     return platform.get_service(name)
 

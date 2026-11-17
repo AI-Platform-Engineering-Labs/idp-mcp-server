@@ -49,6 +49,7 @@ def _from_entity(e: dict) -> dict:
         "lifecycle": spec.get("lifecycle", ""),
         "type": spec.get("type", ""),
         "tier": meta.get("annotations", {}).get("idp.demo/tier", ""),
+        "oncall": meta.get("annotations", {}).get("idp.demo/oncall", ""),
     }
 
 
@@ -83,7 +84,9 @@ def get_service(name: str) -> dict:
     summary = _require_service(name)
     base = backstage_url()
     if not base:
-        return summary
+        depends_on = summary.get("depends_on", [])
+        used_by = sorted(s["name"] for s in list_services() if name in s.get("depends_on", []))
+        return {**summary, "depends_on": depends_on, "depended_on_by": used_by}
     try:
         r = httpx.get(
             f"{base}/api/catalog/entities/by-name/component/default/{name}",
@@ -97,6 +100,15 @@ def get_service(name: str) -> dict:
     detail = _from_entity(entity)
     detail["tags"] = entity.get("metadata", {}).get("tags", [])
     detail["links"] = entity.get("metadata", {}).get("links", [])
+    relations = entity.get("relations", [])
+
+    def related(kind: str) -> list[str]:
+        refs = [r.get("targetRef", "") for r in relations if r.get("type") == kind]
+        return sorted(ref.rsplit("/", 1)[-1] for ref in refs if ref.startswith("component:"))
+
+    # What this service needs, and what breaks if it goes down.
+    detail["depends_on"] = related("dependsOn")
+    detail["depended_on_by"] = related("dependencyOf")
     return detail
 
 

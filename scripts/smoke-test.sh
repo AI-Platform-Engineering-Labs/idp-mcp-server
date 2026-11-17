@@ -34,7 +34,9 @@ done
 expect "list_services returned the catalog" "$OUT" 'payments-api'
 
 echo "== get_service orders-web"
-expect "get_service shows the owner" "$(call get_service '{"name":"orders-web"}')" 'team-storefront'
+OUT=$(call get_service '{"name":"orders-web"}')
+expect "get_service shows the owner" "$OUT" 'team-storefront'
+expect "get_service shows what it depends on" "$OUT" 'payments-api'
 
 echo "== get_service_status orders-web (the platform checks it through Backstage)"
 OUT=$(call get_service_status '{"name":"orders-web"}')
